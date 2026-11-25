@@ -31,7 +31,7 @@ jobs:
       - name: Install dependencies and run pytest
         run: |
           pip install -r requirements.txt -r requirements-dev.txt
-          pytest -v
+          python -m pytest -v
 
   static-checks:
     name: Terraform Format, Validate, TFLint & Trivy
@@ -65,7 +65,7 @@ jobs:
           done
 
       - name: Trivy IaC Security Scan
-        uses: aquasecurity/trivy-action@0.28.0
+        uses: aquasecurity/trivy-action@v0.35.0
         with:
           scan-type: config
           scan-ref: terraform/

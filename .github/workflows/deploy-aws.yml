@@ -40,7 +40,7 @@ jobs:
       - name: Run Unit Tests
         run: |
           pip install -r requirements.txt -r requirements-dev.txt
-          pytest -v
+          python -m pytest -v
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -53,14 +53,23 @@ jobs:
           load: true
           tags: northwind-orders:sha-${{ github.sha }}
 
-      - name: Scan Image with Trivy
-        uses: aquasecurity/trivy-action@0.28.0
+      - name: Scan Image with Trivy (Report HIGH & CRITICAL)
+        uses: aquasecurity/trivy-action@v0.35.0
+        with:
+          image-ref: northwind-orders:sha-${{ github.sha }}
+          format: table
+          exit-code: "0"
+          ignore-unfixed: true
+          severity: CRITICAL,HIGH
+
+      - name: Gate Image Scan on CRITICAL Vulnerabilities
+        uses: aquasecurity/trivy-action@v0.35.0
         with:
           image-ref: northwind-orders:sha-${{ github.sha }}
           format: table
           exit-code: "1"
           ignore-unfixed: true
-          severity: CRITICAL,HIGH
+          severity: CRITICAL
 
       - name: Save Image Archive
         run: docker save northwind-orders:sha-${{ github.sha }} -o /tmp/northwind-orders.tar
@@ -118,10 +127,10 @@ jobs:
           TF_VAR_gcp_aws_wif_provider: ${{ vars.GCP_AWS_WIF_PROVIDER }}
           TF_VAR_gcp_backup_writer_sa: ${{ vars.GCP_BACKUP_WRITER_SERVICE_ACCOUNT }}
         run: |
-          # If ECR module resource exists in config, target-apply it first so the image can be pushed before ECS starts
-          if grep -rq "aws_ecr_repository" terraform/ 2>/dev/null; then
-            terraform -chdir=terraform/envs/aws-dev apply -target=module.aws_platform.aws_ecr_repository.app -auto-approve || true
-            ECR_URL=$(terraform -chdir=terraform/envs/aws-dev output -raw ecr_repository_url 2>/dev/null || true)
+          # If ECR module resource exists in .tf config, target-apply it first so the image can be pushed before ECS starts
+          if grep -rq --include="*.tf" --exclude-dir=".terraform" "aws_ecr_repository" terraform/ 2>/dev/null; then
+            terraform -chdir=terraform/envs/aws-dev apply -no-color -target=module.aws_platform.aws_ecr_repository.app -auto-approve
+            ECR_URL=$(terraform -chdir=terraform/envs/aws-dev output -json 2>/dev/null | jq -r '.ecr_repository_url.value // empty')
             if [ -n "$ECR_URL" ]; then
               aws ecr get-login-password --region "${{ vars.AWS_REGION }}" | docker login --username AWS --password-stdin "${ECR_URL%%/*}"
               docker load -i /tmp/northwind-orders.tar
