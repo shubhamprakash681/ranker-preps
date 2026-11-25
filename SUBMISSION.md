@@ -59,7 +59,7 @@
 | Order | Task | Status | Notes |
 |---|---|---|---|
 | 1 | **T2: IaC & CI/CD Foundation** | Code written / `[Pending run]` | PR checks, OIDC/WIF, S3 native lock & GCS backends, `dev` deploy on merge, tag/OPA checks, drift workflow |
-| 2 | **T1: AWS Platform** | Pending | Next task |
+| 2 | **T1: AWS Platform** | Code written / `[Pending run]` | Multi-AZ RDS PG16, ECS Fargate API & Worker in private subnets, ALB (`/readyz`), SQS+DLQ, S3 receipts, CMK KMS, least-privilege IAM |
 | 3 | **T3: GCP Platform & Edge** | Pending | After T1 |
 | 4 | **T4: Observability & SRE** | Pending | After T3 |
 | 5 | **T5: Business Continuity / DR** | Pending | After T3/T4 |
@@ -91,7 +91,18 @@
 - **Alternatives Rejected:**
   - *Regex/grep on `.tf` files:* Easily bypassed by `default_tags`, modules, or dynamic blocks; inspecting the resolved Terraform plan JSON guarantees every actual AWS/GCP resource change is checked accurately.
 
-*(Decisions 5–10 will be added across T1, T3, T4, T5, and T6.)*
+### Decision 5 (T1): ECS Fargate on Shared Private Subnets with Chained Security Groups
+- **Choice:** Deployed API (`0.25 vCPU / 0.5 GB`, 2–4 tasks) and Worker (`0.25 vCPU / 0.5 GB`, 1–2 tasks) on ECS Fargate in the shared private subnets behind an ALB in the public subnets, with RDS Multi-AZ in the data subnets and strict chained security groups (`ALB -> ECS -> RDS`).
+- **Alternatives Rejected:**
+  - *EC2-backed ECS or EKS:* Forbidden by the shared CI role (`ec2:RunInstances` denied) and unnecessary operational overhead for two stateless containers.
+  - *Single API task (`min = 1`):* Would cause downtime during rolling deploys or AZ loss; `min = 2` spans both `us-east-1a` and `us-east-1b` while keeping per-task CPU/memory at half the ceiling (`256/512`).
+
+### Decision 6 (T1): HTTP Listener on ALB with CloudFront HTTPS Edge Compensation (Rule 6 Exception)
+- **Choice:** Exposed the ALB on HTTP port 80 (no custom domain/ACM cert is available for the ALB's default AWS hostname) and documented this as an accepted Rule 6 risk, compensated by placing CloudFront HTTPS in front (T3), enforcing TLS-only (`rds.force_ssl=1`, S3/SQS `aws:SecureTransport=true`) internally, and locking down ECS/RDS ingress strictly to upstream security groups.
+- **Alternatives Rejected:**
+  - *Self-signed certificate on ALB:* Untrusted by standard clients and unnecessary once CloudFront terminates public TLS.
+
+*(Decisions 7–10 will be added across T3, T4, T5, and T6.)*
 
 ---
 
@@ -109,7 +120,19 @@
 - **Rollback Summary:** See [docs/ci-cd.md](docs/ci-cd.md) — `dev` deploys automatically on merge to `main`, and ECS deployment circuit breaker (`enable = true, rollback = true`) plus `/readyz` ALB health checks automatically roll back unhealthy revisions.
 
 ### T1: AWS Platform
-- `[PLACEHOLDER: To be populated in Task 1]`
+- **Sizing & Cost Analysis:** See [docs/architecture.md](docs/architecture.md)
+- **PR Run URL (`aws-dev` plan):** `[PLACEHOLDER: link to PR check run]`
+- **Merge-to-Main Deploy Run URL (`aws-dev` apply + ECR push):** `[PLACEHOLDER: link to deploy-aws run]`
+- **End-to-End `POST /orders` & Receipt Verification Output:**
+  ```bash
+  [PLACEHOLDER: paste curl POST /orders, GET /orders/{id} showing PROCESSED, and aws s3 ls s3://<receipts-bucket>/receipts/]
+  ```
+- **Screenshots:**
+  - `[PLACEHOLDER: Screenshot of ECR repository showing pushed image + Trivy/ECR scan]`
+  - `[PLACEHOLDER: Screenshot of ECS cluster showing running API (2 tasks) & Worker (1 task)]`
+  - `[PLACEHOLDER: Screenshot of RDS Multi-AZ db.t4g.micro (private, KMS-encrypted)]`
+  - `[PLACEHOLDER: Screenshot of S3 receipts bucket with receipts/<order_id>.json]`
+  - `[PLACEHOLDER: (Stretch) HA failover test output — forced RDS failover + task kill under load]`
 
 ### T3: GCP Platform & Cross-Cloud Traffic
 - `[PLACEHOLDER: To be populated in Task 3]`

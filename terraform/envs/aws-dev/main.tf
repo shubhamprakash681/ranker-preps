@@ -1,21 +1,21 @@
-# Bootstrap verification for Task 2 (CI/CD, OIDC, remote state locking, shared VPC data lookup).
-# Replaced with module "aws_platform" in Task 1.
+module "aws_platform" {
+  source = "../../modules/aws-platform"
 
-data "aws_caller_identity" "current" {}
+  name_prefix  = var.name_prefix
+  env          = var.env
+  aws_region   = var.aws_region
+  image_digest = var.image_digest
 
-data "aws_vpc" "shared" {
-  filter {
-    name   = "tag:Name"
-    values = ["hu-devops-26-nov-vpc"]
-  }
-}
-
-output "shared_vpc_id" {
-  description = "ID of the pre-built shared AWS VPC."
-  value       = data.aws_vpc.shared.id
-}
-
-output "environment" {
-  description = "Target environment."
-  value       = "${var.name_prefix}-${var.env}"
+  # Deliberate dev sizing within approved ceilings (API ceiling: 512/1024 x4, Worker ceiling: 256/512 x2)
+  api_cpu                     = 256
+  api_memory                  = 512
+  api_min_capacity            = 2
+  api_max_capacity            = 4
+  worker_cpu                  = 256
+  worker_memory               = 512
+  worker_min_capacity         = 1
+  worker_max_capacity         = 2
+  log_retention_days          = 14
+  skip_final_snapshot         = true
+  secret_recovery_window_days = 0
 }

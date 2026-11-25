@@ -24,3 +24,9 @@ variable "aws_region" {
   type        = string
   default     = "us-east-1"
 }
+
+variable "image_digest" {
+  description = "Immutable sha256 digest of the container image pushed to ECR."
+  type        = string
+  default     = ""
+}
