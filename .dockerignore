@@ -1,0 +1,7 @@
+tests
+legacy
+*.db
+receipts
+__pycache__
+.pytest_cache
+.venv

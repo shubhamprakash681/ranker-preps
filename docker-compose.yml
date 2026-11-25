@@ -1,0 +1,31 @@
+services:
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: orders
+      POSTGRES_PASSWORD: orders
+      POSTGRES_DB: orders
+    ports: ["5432:5432"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U orders"]
+      interval: 3s
+      retries: 20
+
+  api:
+    build: .
+    environment: &env
+      DATABASE_URL: postgresql+psycopg://orders:orders@db:5432/orders
+      QUEUE_BACKEND: db
+      STORAGE_BACKEND: local
+      STORAGE_TARGET: /tmp/receipts
+      CLOUD: local
+    ports: ["8080:8080"]
+    depends_on:
+      db: { condition: service_healthy }
+
+  worker:
+    build: .
+    command: ["python", "-m", "app.worker"]
+    environment: *env
+    depends_on:
+      db: { condition: service_healthy }

@@ -1,0 +1,181 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Northwind Orders</title>
+<style>
+  :root { --green:#86BC25; --dark:#282728; --gray:#E6E6E6; --blue:#00A3E0; --red:#C4262E; --amber:#B7791F; }
+  * { box-sizing: border-box; }
+  body { margin:0; font:15px/1.5 -apple-system, "Segoe UI", Arial, sans-serif; color:var(--dark); background:#F5F5F5; }
+  header { background:var(--dark); color:#fff; padding:14px 24px; display:flex; align-items:center; gap:16px; flex-wrap:wrap; }
+  header h1 { font-size:18px; margin:0; font-weight:700; }
+  header h1 span { color:var(--green); }
+  .pill { display:inline-flex; align-items:center; gap:8px; padding:3px 12px; border-radius:999px; font-weight:700; font-size:13px; background:#444; }
+  .pill i { width:9px; height:9px; border-radius:50%; background:#888; display:inline-block; }
+  .pill.aws { background:#5B7A1F; } .pill.gcp { background:#00799F; } .pill.ok i { background:var(--green); } .pill.bad i { background:var(--red); }
+  main { max-width:980px; margin:20px auto; padding:0 16px; display:grid; gap:16px; }
+  section { background:#fff; border:1px solid var(--gray); border-radius:8px; padding:16px 18px; }
+  h2 { font-size:14px; margin:0 0 10px; text-transform:uppercase; letter-spacing:.06em; color:#555; }
+  .cards { display:grid; grid-template-columns:repeat(auto-fit,minmax(130px,1fr)); gap:10px; }
+  .card { border:1px solid var(--gray); border-left:4px solid var(--green); border-radius:6px; padding:8px 12px; }
+  .card b { display:block; font-size:24px; line-height:1.2; } .card small { color:#666; }
+  form { display:grid; grid-template-columns:2fr 1fr 1fr auto; gap:10px; align-items:end; }
+  label { font-size:12px; color:#555; display:block; margin-bottom:2px; }
+  input, select { width:100%; padding:8px 10px; border:1px solid #bbb; border-radius:6px; font:inherit; }
+  button { padding:9px 18px; border:0; border-radius:6px; background:var(--green); color:#000; font-weight:700; cursor:pointer; }
+  button:disabled { opacity:.5; cursor:wait; }
+  table { width:100%; border-collapse:collapse; font-size:13px; }
+  th { text-align:left; background:var(--dark); color:#fff; padding:6px 8px; }
+  td { padding:6px 8px; border-bottom:1px solid var(--gray); font-variant-numeric:tabular-nums; }
+  .st { font-weight:700; } .st.PROCESSED { color:#3B7A12; } .st.NEW { color:var(--amber); } .st.FAILED { color:var(--red); }
+  .msg { margin-top:10px; padding:8px 12px; border-radius:6px; font-size:13px; display:none; }
+  .msg.ok { display:block; background:#EAF4D7; } .msg.err { display:block; background:#FBE4E5; color:#7A1217; }
+  .muted { color:#777; font-size:12px; }
+  code { background:#F2F2F2; padding:0 4px; border-radius:3px; }
+  @media (max-width:700px) { form { grid-template-columns:1fr; } }
+</style>
+</head>
+<body>
+<header>
+  <h1>Northwind <span>Orders</span></h1>
+  <span id="cloud" class="pill"><i></i><span>served by: checking...</span></span>
+  <span id="ready" class="pill"><i></i><span>database: checking...</span></span>
+  <span id="ver" class="muted" style="color:#bbb"></span>
+</header>
+<main>
+  <section>
+    <h2>Orders by status</h2>
+    <div class="cards" id="cards"></div>
+    <p class="muted" id="statsnote"></p>
+  </section>
+
+  <section>
+    <h2>Place an order</h2>
+    <form id="form">
+      <div><label for="customer">Customer id</label><input id="customer" value="web-demo" maxlength="64" required></div>
+      <div><label for="amount">Amount (major units)</label><input id="amount" type="number" min="0.01" step="0.01" value="19.99" required></div>
+      <div><label for="currency">Currency</label>
+        <select id="currency"><option>USD</option><option>EUR</option><option>GBP</option><option>INR</option></select></div>
+      <button id="submit" type="submit">Create order</button>
+    </form>
+    <div id="result" class="msg"></div>
+  </section>
+
+  <section>
+    <h2>Recent orders</h2>
+    <table>
+      <thead><tr><th>Order id</th><th>Customer</th><th>Amount</th><th>Status</th><th>Created (UTC)</th><th>Processed (UTC)</th></tr></thead>
+      <tbody id="rows"><tr><td colspan="6" class="muted">loading...</td></tr></tbody>
+    </table>
+    <p class="muted">Refreshes every 10 seconds while this tab is visible. Uses only the public API: <code>/orders</code>, <code>/orders/stats</code>, <code>/version</code>, <code>/readyz</code>.</p>
+  </section>
+</main>
+
+<script>
+"use strict";
+const $ = (id) => document.getElementById(id);
+const fmtTime = (iso) => (iso ? iso.replace("T", " ").slice(0, 19) : "-");
+const fmtMoney = (cents, cur) => (cents / 100).toFixed(2) + " " + cur;
+
+async function getJson(path) {
+  const r = await fetch(path, { headers: { accept: "application/json" }, cache: "no-store" });
+  let body = null;
+  try { body = await r.json(); } catch (e) { /* not JSON */ }
+  return { ok: r.ok, status: r.status, body };
+}
+
+function setPill(el, cls, text) {
+  el.className = "pill " + cls;
+  el.querySelector("span").textContent = text;
+}
+
+async function refreshIdentity() {
+  try {
+    const v = await getJson("/version");
+    if (v.ok) {
+      setPill($("cloud"), v.body.cloud, "served by: " + String(v.body.cloud).toUpperCase());
+      $("ver").textContent = v.body.service + " v" + v.body.version;
+    } else { setPill($("cloud"), "bad", "served by: error " + v.status); }
+  } catch (e) { setPill($("cloud"), "bad", "served by: unreachable"); }
+  try {
+    const r = await getJson("/readyz");
+    setPill($("ready"), r.ok ? "ok" : "bad", r.ok ? "database: up" : "database: down");
+  } catch (e) { setPill($("ready"), "bad", "database: unreachable"); }
+}
+
+async function refreshStats() {
+  const cards = $("cards");
+  try {
+    const s = await getJson("/orders/stats");
+    if (!s.ok) throw new Error("HTTP " + s.status);
+    const by = s.body.by_status || {};
+    const items = [["Total", s.body.total]].concat(Object.keys(by).sort().map((k) => [k, by[k]]));
+    cards.replaceChildren(...items.map(([label, n]) => {
+      const d = document.createElement("div"); d.className = "card";
+      const b = document.createElement("b"); b.textContent = n;
+      const sm = document.createElement("small"); sm.textContent = label;
+      d.append(b, sm); return d;
+    }));
+    const age = s.body.oldest_new_age_seconds;
+    $("statsnote").textContent = age === null ? "No order is waiting for the worker." :
+      "Oldest order still waiting for the worker: " + age + " s (a growing number means the queue is not draining).";
+  } catch (e) { $("statsnote").textContent = "Could not load the counts: " + e.message; }
+}
+
+async function refreshOrders() {
+  const tbody = $("rows");
+  try {
+    const o = await getJson("/orders?limit=20");
+    if (!o.ok) throw new Error("HTTP " + o.status);
+    if (!o.body.items.length) { tbody.innerHTML = '<tr><td colspan="6" class="muted">no orders yet</td></tr>'; return; }
+    tbody.replaceChildren(...o.body.items.map((x) => {
+      const tr = document.createElement("tr");
+      const cells = [x.id.slice(0, 8), x.customer_id, fmtMoney(x.amount_cents, x.currency), x.status, fmtTime(x.created_at), fmtTime(x.processed_at)];
+      cells.forEach((text, i) => {
+        const td = document.createElement("td"); td.textContent = text;
+        if (i === 3) td.className = "st " + x.status;
+        if (i === 0) td.title = x.id;
+        tr.appendChild(td);
+      });
+      return tr;
+    }));
+  } catch (e) { tbody.innerHTML = ""; const tr = tbody.insertRow(); const td = tr.insertCell(); td.colSpan = 6; td.className = "muted"; td.textContent = "Could not load orders: " + e.message; }
+}
+
+const refreshAll = () => Promise.all([refreshIdentity(), refreshStats(), refreshOrders()]);
+
+$("form").addEventListener("submit", async (ev) => {
+  ev.preventDefault();
+  const btn = $("submit"), out = $("result");
+  btn.disabled = true; out.className = "msg"; out.textContent = "";
+  const key = (crypto.randomUUID ? crypto.randomUUID() : String(Date.now()) + Math.random());
+  try {
+    const r = await fetch("/orders", {
+      method: "POST",
+      headers: { "content-type": "application/json", "idempotency-key": key },
+      body: JSON.stringify({
+        customer_id: $("customer").value.trim(),
+        amount_cents: Math.round(parseFloat($("amount").value) * 100),
+        currency: $("currency").value,
+      }),
+    });
+    let body = null; try { body = await r.json(); } catch (e) { /* not JSON */ }
+    if (r.ok) {
+      out.className = "msg ok";
+      out.textContent = "Order " + body.id + " created (" + body.status + "). It becomes PROCESSED when the worker picks it up.";
+    } else {
+      out.className = "msg err";
+      out.textContent = "The API answered " + r.status + ": " + (body && body.detail ? JSON.stringify(body.detail) : "no details");
+    }
+  } catch (e) { out.className = "msg err"; out.textContent = "Could not reach the API: " + e.message; }
+  btn.disabled = false;
+  refreshAll();
+});
+
+refreshAll();
+setInterval(() => { if (!document.hidden) refreshAll(); }, 10000);
+document.addEventListener("visibilitychange", () => { if (!document.hidden) refreshAll(); });
+</script>
+</body>
+</html>
