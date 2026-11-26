@@ -65,8 +65,8 @@
 | Order | Task | Status | Notes |
 |---|---|---|---|
 | 1 | **T2: IaC & CI/CD Foundation** | Code written / `[Pending run]` | PR checks, OIDC/WIF, S3 native lock & GCS backends, `dev` deploy on merge, tag/OPA checks, drift workflow |
-| 2 | **T1: AWS Platform** | Code written / `[Pending run]` | Multi-AZ RDS PG16, ECS Fargate API & Worker in private subnets, ALB (`/readyz`), SQS+DLQ, S3 receipts, CMK KMS, least-privilege IAM |
-| 3 | **T3: GCP Platform & Edge** | Code written / `[Pending run]` | Cloud Run API & Worker (Direct VPC), Cloud SQL PG16 (private IP, PITR), Pub/Sub+DLQ, GCS, Secret Manager, CloudFront + Functions/KVS traffic switch |
+| 2 | **T1: AWS Platform** | Deployed & verified | Multi-AZ RDS PG16, ECS Fargate API & Worker in private subnets, ALB (`/readyz`), SQS+DLQ, S3 receipts, CMK KMS, least-privilege IAM |
+| 3 | **T3: GCP Platform & Edge** | Code written / `[Pending verify]` | Cloud Run API & Worker (Direct VPC), Cloud SQL PG16 (private IP, PITR), Pub/Sub+DLQ, GCS, Secret Manager, CloudFront + Functions/KVS traffic switch |
 | 4 | **T4: Observability & SRE** | Code written / `[Pending incident]` | SLOs & error-budget policy, CloudWatch & Cloud Monitoring dashboards + multi-window burn-rate & cause alerts, API→Worker `trace_id`, `db_query_duration_seconds`, synthetic probe, runbooks |
 | 5 | **T5: Business Continuity / DR** | Pending | After T3/T4 |
 | 6 | **T6: Legacy Migration** | Pending | Final task |
@@ -191,14 +191,30 @@
      aws rds describe-db-instances --region us-east-1 --db-instance-identifier nwo-<username>-dev-pg --query "DBInstances[0].{MultiAZ:MultiAZ,Public:PubliclyAccessible,Encrypted:StorageEncrypted,Engine:Engine}"
      ```
 - **End-to-End `POST /orders` & Receipt Verification Output:**
-  ```text
-  [PLACEHOLDER: paste outputs from the commands above]
-  ```
+
+  ![POST/order](images/post_order.png)
+
+  ![GET/order](images/check_order_status.png)
+
 - **Screenshots:**
-  - `[PLACEHOLDER: Screenshot — ECR repository showing pushed image + Trivy/ECR scan]`
-  - `[PLACEHOLDER: Screenshot — ECS cluster showing running API (2 tasks) & Worker (1 task)]`
-  - `[PLACEHOLDER: Screenshot — RDS Multi-AZ db.t4g.micro (private, KMS-encrypted)]`
-  - `[PLACEHOLDER: Screenshot — S3 receipts bucket with receipts/<order_id>.json]`
+  - ECR repository showing pushed image + KMS / scan:
+
+    ![Screenshot of ECR repository showing pushed image](images/ECR_image-KMS.png)
+
+    ![Screenshot of ECR repository showing pushed image](images/ECR_image.png)
+
+  - ECS cluster showing running API (2 tasks) & Worker (1 task):
+
+    ![Screenshot of ECS cluster showing running API (2 tasks) & Worker (1 task)](images/ECS_cluster_running.png)
+
+  - RDS Multi-AZ `db.t4g.micro` (private, KMS-encrypted):
+
+    ![Screenshot of RDS Multi-AZ db.t4g.micro](images/RDS.png)
+
+  - S3 receipts bucket with `receipts/<order_id>.json`:
+
+    ![S3 Receipt](images/s3_receipts.png)
+
   - `[PLACEHOLDER: Screenshot — SQS queue + DLQ redrive policy]`
   - `[PLACEHOLDER: (Stretch) HA failover test output — forced RDS failover + task kill under load]`
 
