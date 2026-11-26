@@ -132,7 +132,14 @@ jobs:
           IMAGE_TAG="${AR_URL}/orders:${TAG}"
           docker tag "northwind-orders:${TAG}" "$IMAGE_TAG"
           docker push "$IMAGE_TAG"
-          IMAGE_REF=$(docker inspect --format='{{index .RepoDigests 0}}' "$IMAGE_TAG")
+          IMAGE_REF=$(gcloud artifacts docker images describe "$IMAGE_TAG" --format='value(image_summary.fully_qualified_digest)' || true)
+          if [ -z "$IMAGE_REF" ]; then
+            IMAGE_REF=$(docker inspect --format='{{range .RepoDigests}}{{println .}}{{end}}' "$IMAGE_TAG" | grep "^${AR_URL}/orders@sha256:" | head -n1 || true)
+          fi
+          if [[ "$IMAGE_REF" != "${AR_URL}/orders@sha256:"* ]]; then
+            echo "ERROR: Could not resolve Artifact Registry digest for $IMAGE_TAG (got '$IMAGE_REF')" >&2
+            exit 1
+          fi
           echo "Pushed immutable image ref: $IMAGE_REF"
           echo "image_ref=$IMAGE_REF" >> "$GITHUB_OUTPUT"
 

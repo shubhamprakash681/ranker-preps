@@ -75,6 +75,8 @@ jobs:
 
           if [ -n "$ORIGIN_SECRET" ]; then
             echo "::add-mask::$ORIGIN_SECRET"
+          else
+            ORIGIN_SECRET="none"
           fi
           echo "ready=true" >> "$GITHUB_OUTPUT"
           echo "aws_alb=$AWS_ALB" >> "$GITHUB_OUTPUT"
