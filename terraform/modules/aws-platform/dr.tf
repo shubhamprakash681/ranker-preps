@@ -186,7 +186,10 @@ data "aws_iam_policy_document" "backup_scheduler" {
     sid       = "RunBackupTask"
     effect    = "Allow"
     actions   = ["ecs:RunTask"]
-    resources = [aws_ecs_task_definition.backup.arn]
+    resources = [
+      aws_ecs_task_definition.backup.arn,
+      aws_ecs_task_definition.settlement.arn,
+    ]
     condition {
       test     = "ArnEquals"
       variable = "ecs:cluster"
@@ -201,6 +204,8 @@ data "aws_iam_policy_document" "backup_scheduler" {
     resources = [
       aws_iam_role.backup_execution.arn,
       var.aws_backup_task_role_arn,
+      aws_iam_role.task_execution.arn,
+      aws_iam_role.task.arn,
     ]
   }
 }

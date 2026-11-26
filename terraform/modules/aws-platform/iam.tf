@@ -51,6 +51,7 @@ data "aws_iam_policy_document" "task_execution" {
     resources = [
       "${aws_cloudwatch_log_group.api.arn}:*",
       "${aws_cloudwatch_log_group.worker.arn}:*",
+      "${aws_cloudwatch_log_group.settlement.arn}:*",
     ]
   }
 

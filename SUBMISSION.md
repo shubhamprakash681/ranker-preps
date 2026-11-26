@@ -69,7 +69,7 @@
 | 3 | **T3: GCP Platform & Edge** | Code written / `[Pending verify]` | Cloud Run API & Worker (Direct VPC), Cloud SQL PG16 (private IP, PITR), Pub/Sub+DLQ, GCS, Secret Manager, CloudFront + Functions/KVS traffic switch |
 | 4 | **T4: Observability & SRE** | Code written / `[Pending incident]` | SLOs & error-budget policy, CloudWatch & Cloud Monitoring dashboards + multi-window burn-rate & cause alerts, API→Worker `trace_id`, `db_query_duration_seconds`, synthetic probe, runbooks |
 | 5 | **T5: Business Continuity / DR** | Code written / `[Pending game day]` | 10-min immutable S3 Object Lock + GCS retention backups via `nwo-aws` WIF, Cloud Run restore job + Scheduler (`dr_state` promotion guard), automated `failover.yml` printing RPO/RTO |
-| 6 | **T6: Legacy Migration** | Pending | Final task |
+| 6 | **T6: Legacy Migration** | Code written / `[Pending verify]` | 6Rs plan (`docs/migration-plan.md`), repeatable loader & SHA-256 validator handling 6 dump/job issues, cutover/rollback plan, containerized `app.settlement` + nightly EventBridge schedule |
 
 ---
 
@@ -377,11 +377,59 @@
   - `[PLACEHOLDER: Screenshot — Post-failover order PROCESSED on GCP]`
 
 ### T6: Legacy Migration
-- `[PLACEHOLDER: To be populated in Task 6]`
+- **6Rs Strategy, Data-Quality Findings, Cutover/Rollback & Canary Plan:** [docs/migration-plan.md](docs/migration-plan.md)
+- **Repeatable Loader:** [scripts/migration/load_legacy.py](scripts/migration/load_legacy.py)
+- **Validation Script:** [scripts/migration/validate_legacy.py](scripts/migration/validate_legacy.py)
+- **Cloud-Native Settlement Job (Stretch):** [app/settlement.py](app/settlement.py) + [terraform/modules/aws-platform/migration.tf](terraform/modules/aws-platform/migration.tf)
+- **Data-Quality Problems Found & Explicit Decisions:**
+  1. **9 NULL customer emails (`\N`)** → kept `email` nullable and `COALESCE(c.email, '')` in `app.settlement`.
+  2. **12 case-insensitive duplicate emails (`USER21@Example.com` vs `user21@example.com`)** → preserved all 500 PKs, added non-unique `email_normalized` index, logged duplicates for business cleanup.
+  3. **37 dirty invoice statuses (`'paid '`)** → normalized via `UPPER(TRIM(status))` (restoring all `3,979` `PAID` invoices) + added `CHECK` constraint.
+  4. **Naive `America/New_York` timestamps + 1 DST spring-forward gap timestamp (`2024-03-10 02:38:50` at line 4700)** → deterministic conversion to UTC `TIMESTAMPTZ` (`fold=0`) and NY-timezone settlement window bounds.
+  5. **Sequence high-water marks > `MAX(id)` (`637`, `12200`) & missing `DEFAULT`** → added `DEFAULT nextval(...)` and preserved `setval` values.
+  6. **Host assumptions in `legacy/nightly_settlement.py`** → migrated to `app.settlement` on ECS Fargate + EventBridge (`01:30 America/New_York`), Secrets Manager password, S3 CSV output.
+- **Verification Commands (standalone, run one by one):**
+  1. Run local PostgreSQL container (if rehearsing locally via `docker compose`):
+     ```bash
+     docker compose up -d db
+     ```
+  2. Run repeatable loader twice to prove idempotency:
+     ```bash
+     python3 scripts/migration/load_legacy.py --dump legacy/legacy_dump.sql
+     ```
+     ```bash
+     python3 scripts/migration/load_legacy.py --dump legacy/legacy_dump.sql
+     ```
+  3. Run validation script (proves row counts, SHA-256 checksums, sequences, and data quality match):
+     ```bash
+     python3 scripts/migration/validate_legacy.py --dump legacy/legacy_dump.sql
+     ```
+  4. Run settlement job locally against rehearsed DB:
+     ```bash
+     python -m app.settlement 2024-06-15
+     ```
+  5. Run unit tests for migration & settlement:
+     ```bash
+     python -m pytest -v
+     ```
+  6. *(Stretch on AWS)* Run settlement task on ECS Fargate (writes CSV to S3 `receipts` bucket under `settlements/`):
+     ```bash
+     aws ecs run-task --region us-east-1 --cluster nwo-<username>-dev-cluster --launch-type FARGATE --task-definition nwo-<username>-dev-settlement --network-configuration "awsvpcConfiguration={subnets=[<private_subnet_1>,<private_subnet_2>],securityGroups=[<ecs_sg_id>],assignPublicIp=DISABLED}"
+     ```
+     ```bash
+     aws s3 ls s3://nwo-<username>-dev-receipts-<account_id>/settlements/
+     ```
+- **Load & Validation Output:**
+  ```text
+  [PLACEHOLDER: paste output of load_legacy.py and validate_legacy.py]
+  ```
+- **Screenshots:**
+  - `[PLACEHOLDER: Screenshot — Repeatable load + validate_legacy.py showing VALIDATION PASSED and SHA-256 agreement]`
+  - `[PLACEHOLDER: Screenshot — (Stretch) S3 settlements/settlement_YYYYMMDD.csv & EventBridge nightly schedule]`
 
 ---
 
 ## 6. Incomplete Items / Known Limitations
-- Task T6 is pending implementation (building task by task).
+- All tasks T1–T6 are implemented in code; `[update with any remaining live test runs, postmortem, or game-day outputs before final hand-in]`.
 - `prod` environment stacks were omitted for this `dev`-only configuration.
 - `[Update before final submission with any remaining gaps or accepted constraints]`
