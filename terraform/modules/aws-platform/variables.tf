@@ -117,3 +117,9 @@ variable "gcp_project_id" {
   description = "Shared GCP project ID used to compute the target GCS backup bucket name."
   type        = string
 }
+
+variable "create_cloudwatch_dashboard" {
+  description = "Whether to create aws_cloudwatch_dashboard (requires cloudwatch:PutDashboard on CI role)."
+  type        = bool
+  default     = false
+}

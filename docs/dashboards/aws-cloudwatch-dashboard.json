@@ -1,0 +1,91 @@
+{
+  "widgets": [
+    {
+      "type": "metric",
+      "x": 0,
+      "y": 0,
+      "width": 8,
+      "height": 6,
+      "properties": {
+        "title": "ALB Requests & 5XX Errors",
+        "region": "us-east-1",
+        "stat": "Sum",
+        "period": 60,
+        "metrics": [
+          ["AWS/ApplicationELB", "RequestCount", "LoadBalancer", "<alb_arn_suffix>"],
+          [".", "HTTPCode_Target_5XX_Count", ".", "."],
+          [".", "HTTPCode_ELB_5XX_Count", ".", "."]
+        ]
+      }
+    },
+    {
+      "type": "metric",
+      "x": 8,
+      "y": 0,
+      "width": 8,
+      "height": 6,
+      "properties": {
+        "title": "ALB Latency (p50 / p95 / p99)",
+        "region": "us-east-1",
+        "period": 60,
+        "metrics": [
+          ["AWS/ApplicationELB", "TargetResponseTime", "LoadBalancer", "<alb_arn_suffix>", { "stat": "p50" }],
+          ["...", { "stat": "p95" }],
+          ["...", { "stat": "p99" }]
+        ]
+      }
+    },
+    {
+      "type": "metric",
+      "x": 16,
+      "y": 0,
+      "width": 8,
+      "height": 6,
+      "properties": {
+        "title": "SQS Queue Depth, Age & DLQ",
+        "region": "us-east-1",
+        "period": 60,
+        "metrics": [
+          ["AWS/SQS", "ApproximateNumberOfMessagesVisible", "QueueName", "nwo-<username>-dev-orders"],
+          [".", "ApproximateAgeOfOldestMessage", ".", "."],
+          [".", "ApproximateNumberOfMessagesVisible", ".", "nwo-<username>-dev-orders-dlq"]
+        ]
+      }
+    },
+    {
+      "type": "metric",
+      "x": 0,
+      "y": 6,
+      "width": 12,
+      "height": 6,
+      "properties": {
+        "title": "ECS API & Worker CPU / Memory",
+        "region": "us-east-1",
+        "period": 60,
+        "metrics": [
+          ["AWS/ECS", "CPUUtilization", "ClusterName", "nwo-<username>-dev-cluster", "ServiceName", "nwo-<username>-dev-api"],
+          [".", "MemoryUtilization", ".", ".", ".", "."],
+          [".", "CPUUtilization", ".", ".", "ServiceName", "nwo-<username>-dev-worker"],
+          [".", "MemoryUtilization", ".", ".", ".", "."]
+        ]
+      }
+    },
+    {
+      "type": "metric",
+      "x": 12,
+      "y": 6,
+      "width": 12,
+      "height": 6,
+      "properties": {
+        "title": "RDS PostgreSQL CPU & Connections",
+        "region": "us-east-1",
+        "period": 60,
+        "metrics": [
+          ["AWS/RDS", "CPUUtilization", "DBInstanceIdentifier", "nwo-<username>-dev-pg"],
+          [".", "DatabaseConnections", ".", "."],
+          [".", "ReadLatency", ".", "."]
+        ]
+      }
+    }
+  ]
+}

@@ -78,7 +78,8 @@ resource "aws_cloudwatch_metric_alarm" "avail_burn_1h" {
   evaluation_periods  = 1
   threshold           = 0.0144
   treat_missing_data  = "notBreaching"
-  alarm_description   = "1h window Availability fast burn (>14.4x budget for 99.9% SLO)"
+  alarm_description   = "PAGE (1h window): Availability SLO 14.4x fast burn (>1.44% 5xx for 99.9% SLO). First action: inspect ECS /readyz & ALB 5XX logs by trace_id. Runbook: ${var.repo_url}/blob/main/docs/runbooks/availability-burn-rate.md"
+  alarm_actions       = [aws_sns_topic.alerts.arn]
 
   metric_query {
     id          = "e_err"
@@ -128,17 +129,6 @@ resource "aws_cloudwatch_metric_alarm" "avail_burn_1h" {
 
   tags = {
     Name = "${local.prefix}-slo-avail-burn-1h"
-  }
-}
-
-resource "aws_cloudwatch_composite_alarm" "page_avail_fast_burn" {
-  alarm_name        = "${local.prefix}-page-avail-fast-burn"
-  alarm_description = "PAGE: Availability SLO 14.4x fast burn (5m AND 1h windows). First action: inspect ECS /readyz & ALB 5XX logs by trace_id. Runbook: ${var.repo_url}/blob/main/docs/runbooks/availability-burn-rate.md"
-  alarm_rule        = "ALARM(\"${aws_cloudwatch_metric_alarm.avail_burn_5m.alarm_name}\") AND ALARM(\"${aws_cloudwatch_metric_alarm.avail_burn_1h.alarm_name}\")"
-  alarm_actions     = [aws_sns_topic.alerts.arn]
-
-  tags = {
-    Name = "${local.prefix}-page-avail-fast-burn"
   }
 }
 
@@ -260,16 +250,6 @@ resource "aws_cloudwatch_metric_alarm" "avail_burn_6h" {
   }
 }
 
-resource "aws_cloudwatch_composite_alarm" "ticket_avail_slow_burn" {
-  alarm_name        = "${local.prefix}-ticket-avail-slow-burn"
-  alarm_description = "TICKET: Availability SLO 3x slow burn (30m AND 6h windows). Review error logs & error budget. Runbook: ${var.repo_url}/blob/main/docs/runbooks/availability-burn-rate.md"
-  alarm_rule        = "ALARM(\"${aws_cloudwatch_metric_alarm.avail_burn_30m.alarm_name}\") AND ALARM(\"${aws_cloudwatch_metric_alarm.avail_burn_6h.alarm_name}\")"
-
-  tags = {
-    Name = "${local.prefix}-ticket-avail-slow-burn"
-  }
-}
-
 resource "aws_cloudwatch_metric_alarm" "latency_burn_5m" {
   alarm_name          = "${local.prefix}-slo-latency-burn-5m"
   comparison_operator = "GreaterThanThreshold"
@@ -301,7 +281,8 @@ resource "aws_cloudwatch_metric_alarm" "latency_burn_1h" {
   extended_statistic  = "p99"
   threshold           = 0.5
   treat_missing_data  = "notBreaching"
-  alarm_description   = "1h window Latency SLO breach (p99 > 500ms)"
+  alarm_description   = "PAGE (1h window): Latency SLO p99 > 500ms. First action: check /metrics db_query_duration_seconds & RDS/ECS CPU. Runbook: ${var.repo_url}/blob/main/docs/runbooks/latency-burn-rate.md"
+  alarm_actions       = [aws_sns_topic.alerts.arn]
 
   dimensions = {
     LoadBalancer = aws_lb.api.arn_suffix
@@ -309,17 +290,6 @@ resource "aws_cloudwatch_metric_alarm" "latency_burn_1h" {
 
   tags = {
     Name = "${local.prefix}-slo-latency-burn-1h"
-  }
-}
-
-resource "aws_cloudwatch_composite_alarm" "page_latency_fast_burn" {
-  alarm_name        = "${local.prefix}-page-latency-fast-burn"
-  alarm_description = "PAGE: Latency SLO p99 > 500ms (5m AND 1h windows). First action: check /metrics db_query_duration_seconds & RDS/ECS CPU. Runbook: ${var.repo_url}/blob/main/docs/runbooks/latency-burn-rate.md"
-  alarm_rule        = "ALARM(\"${aws_cloudwatch_metric_alarm.latency_burn_5m.alarm_name}\") AND ALARM(\"${aws_cloudwatch_metric_alarm.latency_burn_1h.alarm_name}\")"
-  alarm_actions     = [aws_sns_topic.alerts.arn]
-
-  tags = {
-    Name = "${local.prefix}-page-latency-fast-burn"
   }
 }
 
@@ -411,8 +381,11 @@ resource "aws_cloudwatch_metric_alarm" "cause_rds_cpu" {
 }
 
 # ---- CloudWatch Dashboard ----
+# Gated by var.create_cloudwatch_dashboard because shared github-oidc-role denies cloudwatch:PutDashboard.
+# The dashboard body is also exported as versioned code in docs/dashboards/aws-cloudwatch-dashboard.json.
 
 resource "aws_cloudwatch_dashboard" "main" {
+  count          = var.create_cloudwatch_dashboard ? 1 : 0
   dashboard_name = "${local.prefix}-dashboard"
 
   dashboard_body = jsonencode({

@@ -441,5 +441,6 @@
 
 ## 6. Incomplete Items / Known Limitations
 - All tasks T1–T6 are implemented in code; `[update with any remaining live test runs, postmortem, or game-day outputs before final hand-in]`.
+- **Shared AWS CI Role (`github-oidc-role`) IAM Limitation on CloudWatch:** The shared `github-oidc-role` returns `AccessDenied` for `cloudwatch:PutCompositeAlarm` and `cloudwatch:PutDashboard` (global dashboard ARN `arn:aws:cloudwatch::015230892207:dashboard/...`). As an alternative, AWS multi-window burn-rate alerts are deployed as paired `aws_cloudwatch_metric_alarm` resources (`5m`/`1h` fast burn & `30m`/`6h` slow burn, with SNS paging + runbook links), `aws_cloudwatch_dashboard.main` is gated behind `var.create_cloudwatch_dashboard = false`, the dashboard definition is versioned in [docs/dashboards/aws-cloudwatch-dashboard.json](docs/dashboards/aws-cloudwatch-dashboard.json), and GCP Cloud Monitoring hosts the full live dashboard (`nwo-<username>-dev-dashboard`), SLOs, and composite multi-window burn-rate alert policies.
 - `prod` environment stacks were omitted for this `dev`-only configuration.
 - `[Update before final submission with any remaining gaps or accepted constraints]`
