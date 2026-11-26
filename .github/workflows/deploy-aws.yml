@@ -126,6 +126,8 @@ jobs:
           TF_VAR_aws_backup_task_role_arn: ${{ vars.AWS_BACKUP_TASK_ROLE_ARN }}
           TF_VAR_gcp_aws_wif_provider: ${{ vars.GCP_AWS_WIF_PROVIDER }}
           TF_VAR_gcp_backup_writer_sa: ${{ vars.GCP_BACKUP_WRITER_SERVICE_ACCOUNT }}
+          TF_VAR_gcp_project_id: ${{ vars.GCP_PROJECT_ID }}
+          TF_VAR_repo_url: ${{ github.server_url }}/${{ github.repository }}
         run: |
           # If ECR module resource exists in .tf config, target-apply it first so the image can be pushed before ECS starts
           if grep -rq --include="*.tf" --exclude-dir=".terraform" "aws_ecr_repository" terraform/ 2>/dev/null; then
