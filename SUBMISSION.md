@@ -131,25 +131,70 @@
 - **Blocked/Failed Tag Check PR URL (Test):** `[PLACEHOLDER: link to PR where an untagged resource failed check_tags.py / Conftest]`
 - **Merge-to-Main Deploy Run URL (`dev`):** `[PLACEHOLDER: https://github.com/Deloitte-DT-Training/hu-devops-26-nov-<username>/actions/runs/...]`
 - **Drift Detection Run URL:** `[PLACEHOLDER: link to scheduled/manual drift-detection run]`
-- **Screenshots:**
-  - `[PLACEHOLDER: Screenshot of PR checks passing + Terraform Plan PR comment]`
-  - `[PLACEHOLDER: Screenshot of failed PR check when adding an untagged resource]`
-  - `[PLACEHOLDER: Screenshot of S3 & GCS state buckets showing <USERNAME>/ prefix]`
+- **Verification Commands (standalone, run one by one):**
+  1. Trigger drift check manually:
+     ```bash
+     gh workflow run drift-detection.yml
+     ```
+  2. Check AWS & GCP remote state prefixes:
+     ```bash
+     aws s3 ls s3://<TF_STATE_BUCKET>/<USERNAME>/
+     ```
+     ```bash
+     gcloud storage ls gs://<GCP_TF_STATE_BUCKET>/<USERNAME>/
+     ```
+- **Verification Outputs & Screenshots:**
+  - `[PLACEHOLDER: Screenshot — GitHub Actions PR Checks passing + Terraform Plan PR comment]`
+  - `[PLACEHOLDER: Screenshot — Failed PR Check when adding an untagged resource (check_tags.py / Conftest)]`
+  - `[PLACEHOLDER: Screenshot — S3 & GCS state buckets showing <USERNAME>/ prefix]`
+  - `[PLACEHOLDER: Screenshot — Drift Detection run]`
 - **Rollback Summary:** See [docs/ci-cd.md](docs/ci-cd.md) — `dev` deploys automatically on merge to `main`, and ECS deployment circuit breaker (`enable = true, rollback = true`) plus `/readyz` ALB health checks automatically roll back unhealthy revisions.
 
 ### T1: AWS Platform
 - **Sizing & Cost Analysis:** See [docs/architecture.md](docs/architecture.md)
 - **PR Run URL (`aws-dev` plan):** `[PLACEHOLDER: link to PR check run]`
 - **Merge-to-Main Deploy Run URL (`aws-dev` apply + ECR push):** `[PLACEHOLDER: link to deploy-aws run]`
+- **Verification Commands (standalone, run one by one):**
+  1. Check ALB DNS name:
+     ```bash
+     aws elbv2 describe-load-balancers --region us-east-1 --names nwo-<username>-dev-alb --query LoadBalancers[0].DNSName --output text
+     ```
+  2. Verify readiness, order creation, processing, and S3 receipt (via CloudFront once T3 is active, or ALB before `enable_edge_only`):
+     ```bash
+     curl -s https://<cloudfront_domain_name>/readyz
+     ```
+     ```bash
+     curl -s -X POST https://<cloudfront_domain_name>/orders -H "Content-Type: application/json" -d "{\"customer_id\":\"c-t1-aws\",\"amount_cents\":1999,\"currency\":\"USD\"}"
+     ```
+     ```bash
+     curl -s https://<cloudfront_domain_name>/orders/<order_id>
+     ```
+     ```bash
+     aws s3 ls s3://nwo-<username>-dev-receipts-<account_id>/receipts/
+     ```
+  3. Verify ECR image scan, ECS tasks, SQS + DLQ, and Multi-AZ RDS:
+     ```bash
+     aws ecr describe-images --region us-east-1 --repository-name nwo-<username>-dev-orders
+     ```
+     ```bash
+     aws ecs list-tasks --region us-east-1 --cluster nwo-<username>-dev-cluster
+     ```
+     ```bash
+     aws sqs get-queue-attributes --region us-east-1 --queue-url <sqs_queue_url> --attribute-names RedrivePolicy KmsMasterKeyId
+     ```
+     ```bash
+     aws rds describe-db-instances --region us-east-1 --db-instance-identifier nwo-<username>-dev-pg --query "DBInstances[0].{MultiAZ:MultiAZ,Public:PubliclyAccessible,Encrypted:StorageEncrypted,Engine:Engine}"
+     ```
 - **End-to-End `POST /orders` & Receipt Verification Output:**
-  ```bash
-  [PLACEHOLDER: paste curl POST /orders, GET /orders/{id} showing PROCESSED, and aws s3 ls s3://<receipts-bucket>/receipts/]
+  ```text
+  [PLACEHOLDER: paste outputs from the commands above]
   ```
 - **Screenshots:**
-  - `[PLACEHOLDER: Screenshot of ECR repository showing pushed image + Trivy/ECR scan]`
-  - `[PLACEHOLDER: Screenshot of ECS cluster showing running API (2 tasks) & Worker (1 task)]`
-  - `[PLACEHOLDER: Screenshot of RDS Multi-AZ db.t4g.micro (private, KMS-encrypted)]`
-  - `[PLACEHOLDER: Screenshot of S3 receipts bucket with receipts/<order_id>.json]`
+  - `[PLACEHOLDER: Screenshot — ECR repository showing pushed image + Trivy/ECR scan]`
+  - `[PLACEHOLDER: Screenshot — ECS cluster showing running API (2 tasks) & Worker (1 task)]`
+  - `[PLACEHOLDER: Screenshot — RDS Multi-AZ db.t4g.micro (private, KMS-encrypted)]`
+  - `[PLACEHOLDER: Screenshot — S3 receipts bucket with receipts/<order_id>.json]`
+  - `[PLACEHOLDER: Screenshot — SQS queue + DLQ redrive policy]`
   - `[PLACEHOLDER: (Stretch) HA failover test output — forced RDS failover + task kill under load]`
 
 ### T3: GCP Platform & Cross-Cloud Traffic
@@ -157,20 +202,63 @@
 - **GCP Deploy Run URL:** `[PLACEHOLDER: link to deploy-gcp run]`
 - **Edge Deploy Run URL:** `[PLACEHOLDER: link to deploy-edge run]`
 - **Traffic Switch Test Run URL (`100/0 -> 0/100 -> 100/0`):** `[PLACEHOLDER: link to traffic-switch run]`
+- **Verification Commands (standalone, run one by one):**
+  1. Check normal state (`100% AWS / 0% GCP`):
+     ```bash
+     curl -s https://<cloudfront_domain_name>/version
+     ```
+  2. Check readiness via public hostname:
+     ```bash
+     curl -s https://<cloudfront_domain_name>/readyz
+     ```
+  3. Create an order on AWS through CloudFront & verify `PROCESSED`:
+     ```bash
+     curl -s -X POST https://<cloudfront_domain_name>/orders -H "Content-Type: application/json" -d "{\"customer_id\":\"c-t3-aws\",\"amount_cents\":1500,\"currency\":\"USD\"}"
+     ```
+     ```bash
+     curl -s https://<cloudfront_domain_name>/orders/<order_id>
+     ```
+  4. Verify Stretch (No-bypass) — direct ALB request must return `403`:
+     ```bash
+     curl -i http://<alb_dns_name>/version
+     ```
+  5. Switch `100%` traffic to GCP (`0/100`) without Terraform/redeploy:
+     ```bash
+     gh workflow run traffic-switch.yml -f aws_percentage=0
+     ```
+  6. Verify `gcp` answers within 60 seconds:
+     ```bash
+     curl -s https://<cloudfront_domain_name>/version
+     ```
+  7. Create an order on GCP through CloudFront, verify `PROCESSED`, and verify GCS receipt:
+     ```bash
+     curl -s -X POST https://<cloudfront_domain_name>/orders -H "Content-Type: application/json" -d "{\"customer_id\":\"c-t3-gcp\",\"amount_cents\":2500,\"currency\":\"USD\"}"
+     ```
+     ```bash
+     curl -s https://<cloudfront_domain_name>/orders/<order_id>
+     ```
+     ```bash
+     gcloud storage ls gs://nwo-<username>-dev-receipts-<gcp_project_id>/receipts/
+     ```
+  8. Switch traffic back to `100%` AWS (`100/0`) and confirm `aws`:
+     ```bash
+     gh workflow run traffic-switch.yml -f aws_percentage=100
+     ```
+     ```bash
+     curl -s https://<cloudfront_domain_name>/version
+     ```
 - **Verification Outputs:**
-  ```bash
-  # Normal state (100% AWS):
-  [PLACEHOLDER: curl -s https://<cloudfront_domain>/version]
-  # Switched state (0/100 -> GCP within 60s) + POST /orders on GCP:
-  [PLACEHOLDER: curl -s https://<cloudfront_domain>/version && curl -s -X POST https://<cloudfront_domain>/orders ...]
-  # Direct ALB bypass check (403 Forbidden):
-  [PLACEHOLDER: curl -i http://<alb_dns_name>/version]
+  ```text
+  [PLACEHOLDER: paste outputs from commands 1–8 above]
   ```
 - **Screenshots:**
-  - `[PLACEHOLDER: Screenshot of Cloud Run services (API + internal Worker running as nwo-runtime)]`
-  - `[PLACEHOLDER: Screenshot of Cloud SQL pg16 (private IP only, zonal, PITR enabled)]`
-  - `[PLACEHOLDER: Screenshot of CloudFront distribution & KeyValueStore]`
-  - `[PLACEHOLDER: Screenshot of web UI (https://<cloudfront_domain>/) showing AWS badge and GCP badge after switch]`
+  - `[PLACEHOLDER: Screenshot — Cloud Run services (API + internal Worker running as nwo-runtime)]`
+  - `[PLACEHOLDER: Screenshot — Cloud SQL pg16 (private IP only, zonal, PITR enabled)]`
+  - `[PLACEHOLDER: Screenshot — GCS receipts bucket with receipts/<order_id>.json]`
+  - `[PLACEHOLDER: Screenshot — CloudFront distribution & KeyValueStore]`
+  - `[PLACEHOLDER: Screenshot — Web UI (https://<cloudfront_domain_name>/) showing AWS badge]`
+  - `[PLACEHOLDER: Screenshot — Web UI (https://<cloudfront_domain_name>/) showing GCP badge after traffic switch]`
+  - `[PLACEHOLDER: Screenshot — Direct ALB curl returning 403 Forbidden]`
 
 ### T4: Observability & SRE (and Incident Postmortem)
 - `[PLACEHOLDER: To be populated in Task 4]`
@@ -186,5 +274,6 @@
 ---
 
 ## 6. Incomplete Items / Known Limitations
-- Tasks T1, T3, T4, T5, T6 are pending implementation (building task by task).
+- Tasks T4, T5, T6 are pending implementation (building task by task).
+- `prod` environment stacks were omitted for this `dev`-only configuration.
 - `[Update before final submission with any remaining gaps or accepted constraints]`

@@ -58,3 +58,73 @@ Confirm the order becomes PROCESSED (GET $HOST/orders/<id>) and a receipt appear
 Switch traffic back to 100% AWS (aws_percentage = 100) and record the outputs/screenshots in SUBMISSION.md.
 
 Let me know once T3 is deployed and tested (or if any CI step hits an issue), and we'll move on to Task 4 (Observability & SRE)!
+
+
+
+
+1. Grab Your Public CloudFront Hostname
+
+From GitHub Actions → Deploy Cross-Cloud Edge → Terraform Apply (edge-dev) → Outputs: (or AWS Console → CloudFront → Distributions):
+
+bash
+HOST="https://<cloudfront_domain_name>"
+2. Verify Normal State (100% AWS / 0% GCP) & No-Bypass
+bash
+# 1) Public HTTPS endpoint answers and names "aws"
+curl -s "$HOST/version"
+# Expected: {"service":"orders-api","cloud":"aws","version":"1.0.0"}
+# 2) Readiness & end-to-end order on AWS via CloudFront
+curl -s "$HOST/readyz"
+ORDER_AWS=$(curl -s -X POST "$HOST/orders" \
+  -H 'content-type: application/json' \
+  -d '{"customer_id":"c-t3-aws","amount_cents":1500,"currency":"USD"}')
+echo "$ORDER_AWS"
+ORDER_AWS_ID=$(echo "$ORDER_AWS" | jq -r .id)
+sleep 5
+curl -s "$HOST/orders/$ORDER_AWS_ID"   # status should be "PROCESSED"
+# 3) Stretch (No bypass): direct call to AWS ALB must be rejected with 403
+curl -i "http://<alb_dns_name>/version"
+# Expected: HTTP/1.1 403 Forbidden (Direct ALB access forbidden; use CloudFront edge)
+Browser check: Open https://<cloudfront_domain_name>/ in a browser and confirm the UI loads cleanly and its cloud badge shows aws (take a screenshot for SUBMISSION.md).
+3. Verify Traffic Switch (100/0 → 0/100 in < 60s, including POST)
+
+Trigger the traffic switch to 0% AWS / 100% GCP (no Terraform, no redeploy):
+
+bash
+gh workflow run traffic-switch.yml -f aws_percentage=0
+
+(Or in GitHub UI: Actions → Cross-Cloud Traffic Switch → Run workflow → aws_percentage = 0.)
+
+Immediately verify within 60 seconds:
+
+bash
+# Should return "cloud": "gcp" within ~5-15s
+curl -s "$HOST/version"
+# Verify POST /orders works on GCP end-to-end
+ORDER_GCP=$(curl -s -X POST "$HOST/orders" \
+  -H 'content-type: application/json' \
+  -d '{"customer_id":"c-t3-gcp","amount_cents":2500,"currency":"USD"}')
+echo "$ORDER_GCP"
+ORDER_GCP_ID=$(echo "$ORDER_GCP" | jq -r .id)
+sleep 5
+curl -s "$HOST/orders/$ORDER_GCP_ID"   # status should become "PROCESSED"
+Also check your browser at https://<cloudfront_domain_name>/ (hard refresh) — the badge should now show gcp (take a screenshot for SUBMISSION.md!).
+Check GCS bucket nwo-<username>-dev-receipts-<gcp_project_id> in GCP Console → confirm receipts/<ORDER_GCP_ID>.json was written.
+
+Switch back to normal state (100% AWS / 0% GCP):
+
+bash
+gh workflow run traffic-switch.yml -f aws_percentage=100
+sleep 10
+curl -s "$HOST/version"   # confirm "cloud": "aws" again
+4. Verify GCP Console Compliance Checks
+Cloud Run (us-east4):
+nwo-<username>-dev-api & nwo-<username>-dev-worker both run as GCP_RUNTIME_SERVICE_ACCOUNT (no custom service accounts created).
+Worker has Internal ingress only; API uses per-service invoker IAM disabled (no allUsers binding).
+Cloud SQL (us-east4):
+nwo-<username>-dev-pg (db-f1-micro, ENTERPRISE, POSTGRES_16, zonal) has no public IP (private IP only) and PITR enabled.
+5. Update SUBMISSION.md
+
+Fill in the [PLACEHOLDER: ...] entries under Section 1 and Section 5 (T3) in SUBMISSION.md with your cloudfront_domain_name, curl outputs, workflow run links, and screenshots.
+
+Let me know once you've verified Task 3 and are ready to move on to Task 4 (Observability & SRE)!
