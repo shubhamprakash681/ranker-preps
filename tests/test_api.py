@@ -125,3 +125,35 @@ def test_error_rate_fault_and_poison(client, monkeypatch):
     with session_scope() as s:
         assert s.query(QueueMessage).filter(QueueMessage.status == "dead").count() == 1
     client.delete("/_internal/chaos", headers=h)
+
+
+def test_trace_id_propagates_api_to_worker(client):
+    import json
+    import logging
+    from app.logging_conf import JsonFormatter
+
+    records = []
+
+    class Capture(logging.Handler):
+        def emit(self, record):
+            records.append(json.loads(JsonFormatter().format(record)))
+
+    handler = Capture()
+    root = logging.getLogger()
+    root.addHandler(handler)
+    try:
+        r = client.post(
+            "/orders",
+            json={"customer_id": "c-trace", "amount_cents": 420, "currency": "USD"},
+            headers={"X-Cloud-Trace-Context": "trace-abc-123/1;o=1"},
+        )
+        assert r.status_code == 201
+        assert r.headers.get("x-trace-id") == "trace-abc-123"
+        assert worker.run_once(wait_s=0) == 1
+    finally:
+        root.removeHandler(handler)
+
+    api_traces = [rec for rec in records if rec["message"] == "order created" and rec["trace_id"] == "trace-abc-123"]
+    worker_traces = [rec for rec in records if rec["message"] == "order processed" and rec["trace_id"] == "trace-abc-123"]
+    assert len(api_traces) >= 1 and len(worker_traces) >= 1
+    assert "db_query_duration_seconds_bucket" in client.get("/metrics").text

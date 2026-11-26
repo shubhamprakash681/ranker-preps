@@ -38,3 +38,20 @@ variable "origin_verify_secret" {
   sensitive   = true
   default     = "placeholder-origin-verify"
 }
+
+variable "gcp_project_id" {
+  description = "Shared GCP project ID."
+  type        = string
+}
+
+variable "gcp_region" {
+  description = "GCP region."
+  type        = string
+  default     = "us-east4"
+}
+
+variable "repo_url" {
+  description = "Repository URL for runbook links."
+  type        = string
+  default     = "https://github.com/Deloitte-DT-Training"
+}

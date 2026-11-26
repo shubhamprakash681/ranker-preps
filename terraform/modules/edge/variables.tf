@@ -23,3 +23,19 @@ variable "origin_verify_secret" {
   type        = string
   sensitive   = true
 }
+
+variable "username" {
+  description = "Lowercase Deloitte username for GCP monitoring user_labels."
+  type        = string
+}
+
+variable "gcp_project_id" {
+  description = "Shared GCP project ID for synthetic uptime check."
+  type        = string
+}
+
+variable "repo_url" {
+  description = "Repository URL for runbook links."
+  type        = string
+  default     = "https://github.com/Deloitte-DT-Training"
+}

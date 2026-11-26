@@ -40,3 +40,9 @@ variable "image_ref" {
   type        = string
   default     = ""
 }
+
+variable "repo_url" {
+  description = "Repository URL for runbook links in alerts."
+  type        = string
+  default     = "https://github.com/Deloitte-DT-Training"
+}

@@ -47,6 +47,7 @@ jobs:
           TF_VAR_aws_backup_task_role_arn: ${{ vars.AWS_BACKUP_TASK_ROLE_ARN }}
           TF_VAR_gcp_aws_wif_provider: ${{ vars.GCP_AWS_WIF_PROVIDER }}
           TF_VAR_gcp_backup_writer_sa: ${{ vars.GCP_BACKUP_WRITER_SERVICE_ACCOUNT }}
+          TF_VAR_repo_url: ${{ github.server_url }}/${{ github.repository }}
         run: |
           STACK_DIR="terraform/envs/aws-${{ matrix.env }}"
           terraform -chdir="$STACK_DIR" init \
@@ -132,6 +133,7 @@ jobs:
           TF_VAR_gcp_restore_sa: ${{ vars.GCP_RESTORE_SERVICE_ACCOUNT }}
           TF_VAR_gcp_scheduler_sa: ${{ vars.GCP_SCHEDULER_SERVICE_ACCOUNT }}
           TF_VAR_gcp_backup_writer_sa: ${{ vars.GCP_BACKUP_WRITER_SERVICE_ACCOUNT }}
+          TF_VAR_repo_url: ${{ github.server_url }}/${{ github.repository }}
         run: |
           STACK_DIR="terraform/envs/gcp-${{ matrix.env }}"
           terraform -chdir="$STACK_DIR" init \

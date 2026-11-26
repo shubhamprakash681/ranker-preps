@@ -54,11 +54,12 @@ def run_once(queue=None, wait_s: int = 5) -> int:
     max_attempts = get_settings().max_attempts
     handled = 0
     for msg in queue.receive(max_messages=10, wait_s=wait_s):
-        trace_id_var.set(msg.id)
+        trace_id_var.set(msg.payload.get("trace_id") or msg.id)
         try:
             process(msg)
             queue.ack(msg)
             ORDERS_PROCESSED.labels("ok").inc()
+            log(logger, logging.INFO, "order processed", order_id=msg.payload.get("order_id"), message_id=msg.id)
             handled += 1
         except Exception as exc:  # noqa: BLE001
             ORDERS_PROCESSED.labels("error").inc()

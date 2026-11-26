@@ -6,5 +6,9 @@ terraform {
       source  = "hashicorp/aws"
       version = "~> 5.80.0"
     }
+    google = {
+      source  = "hashicorp/google"
+      version = "~> 6.15.0"
+    }
   }
 }

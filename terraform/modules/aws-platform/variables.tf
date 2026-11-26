@@ -91,3 +91,9 @@ variable "enable_edge_only" {
   type        = bool
   default     = false
 }
+
+variable "repo_url" {
+  description = "Repository URL used to link paging alarms to runbooks."
+  type        = string
+  default     = "https://github.com/Deloitte-DT-Training"
+}

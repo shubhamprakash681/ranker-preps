@@ -19,4 +19,5 @@ module "aws_platform" {
   skip_final_snapshot         = true
   secret_recovery_window_days = 0
   enable_edge_only            = true
+  repo_url                    = var.repo_url
 }

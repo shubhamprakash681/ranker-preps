@@ -6,6 +6,10 @@ terraform {
       source  = "hashicorp/aws"
       version = "~> 5.80.0"
     }
+    google = {
+      source  = "hashicorp/google"
+      version = "~> 6.15.0"
+    }
   }
 }
 
@@ -18,5 +22,16 @@ provider "aws" {
       environment = var.env
       managed_by  = "terraform"
     }
+  }
+}
+
+provider "google" {
+  project = var.gcp_project_id
+  region  = var.gcp_region
+
+  default_labels = {
+    username    = var.username
+    environment = var.env
+    managed_by  = "terraform"
   }
 }

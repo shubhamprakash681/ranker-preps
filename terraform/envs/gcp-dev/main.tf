@@ -14,4 +14,5 @@ module "gcp_platform" {
   api_max_instances    = 3
   worker_min_instances = 1
   worker_max_instances = 2
+  repo_url             = var.repo_url
 }

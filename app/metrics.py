@@ -13,3 +13,9 @@ HTTP_LATENCY = Histogram(
 ORDERS_CREATED = Counter("orders_created_total", "Orders accepted")
 ORDERS_PROCESSED = Counter("orders_processed_total", "Orders processed by the worker", ["outcome"])
 QUEUE_DEPTH = Gauge("queue_depth", "Messages waiting (-1 when unknown)")
+DB_QUERY_LATENCY = Histogram(
+    "db_query_duration_seconds",
+    "Database query duration",
+    ["operation"],
+    buckets=(0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2, 5),
+)

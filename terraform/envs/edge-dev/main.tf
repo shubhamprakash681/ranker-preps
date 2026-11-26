@@ -10,4 +10,7 @@ module "edge" {
   aws_alb_dns_name     = var.aws_alb_dns_name
   gcp_api_host         = local.gcp_api_host
   origin_verify_secret = var.origin_verify_secret
+  username             = var.username
+  gcp_project_id       = var.gcp_project_id
+  repo_url             = var.repo_url
 }

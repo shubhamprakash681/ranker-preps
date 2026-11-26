@@ -160,5 +160,6 @@ jobs:
           TF_VAR_aws_backup_task_role_arn: ${{ vars.AWS_BACKUP_TASK_ROLE_ARN }}
           TF_VAR_gcp_aws_wif_provider: ${{ vars.GCP_AWS_WIF_PROVIDER }}
           TF_VAR_gcp_backup_writer_sa: ${{ vars.GCP_BACKUP_WRITER_SERVICE_ACCOUNT }}
+          TF_VAR_repo_url: ${{ github.server_url }}/${{ github.repository }}
         run: |
           terraform -chdir=terraform/envs/aws-dev apply -auto-approve

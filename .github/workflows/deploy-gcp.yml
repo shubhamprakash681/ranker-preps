@@ -152,5 +152,6 @@ jobs:
           TF_VAR_gcp_region: ${{ vars.GCP_REGION }}
           TF_VAR_gcp_runtime_sa: ${{ vars.GCP_RUNTIME_SERVICE_ACCOUNT }}
           TF_VAR_image_ref: ${{ steps.push.outputs.image_ref }}
+          TF_VAR_repo_url: ${{ github.server_url }}/${{ github.repository }}
         run: |
           terraform -chdir=terraform/envs/gcp-dev apply -no-color -auto-approve

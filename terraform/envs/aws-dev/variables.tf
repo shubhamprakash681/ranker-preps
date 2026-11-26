@@ -30,3 +30,9 @@ variable "image_digest" {
   type        = string
   default     = ""
 }
+
+variable "repo_url" {
+  description = "Repository URL for runbook links in alarms."
+  type        = string
+  default     = "https://github.com/Deloitte-DT-Training"
+}

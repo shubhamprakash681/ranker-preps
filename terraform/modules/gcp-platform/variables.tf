@@ -58,3 +58,9 @@ variable "worker_max_instances" {
   type        = number
   default     = 2
 }
+
+variable "repo_url" {
+  description = "Repository URL used to link paging alerts to runbooks."
+  type        = string
+  default     = "https://github.com/Deloitte-DT-Training"
+}

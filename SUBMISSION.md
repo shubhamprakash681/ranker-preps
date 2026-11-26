@@ -67,7 +67,7 @@
 | 1 | **T2: IaC & CI/CD Foundation** | Code written / `[Pending run]` | PR checks, OIDC/WIF, S3 native lock & GCS backends, `dev` deploy on merge, tag/OPA checks, drift workflow |
 | 2 | **T1: AWS Platform** | Code written / `[Pending run]` | Multi-AZ RDS PG16, ECS Fargate API & Worker in private subnets, ALB (`/readyz`), SQS+DLQ, S3 receipts, CMK KMS, least-privilege IAM |
 | 3 | **T3: GCP Platform & Edge** | Code written / `[Pending run]` | Cloud Run API & Worker (Direct VPC), Cloud SQL PG16 (private IP, PITR), Pub/Sub+DLQ, GCS, Secret Manager, CloudFront + Functions/KVS traffic switch |
-| 4 | **T4: Observability & SRE** | Pending | After T3 |
+| 4 | **T4: Observability & SRE** | Code written / `[Pending incident]` | SLOs & error-budget policy, CloudWatch & Cloud Monitoring dashboards + multi-window burn-rate & cause alerts, API→Worker `trace_id`, `db_query_duration_seconds`, synthetic probe, runbooks |
 | 5 | **T5: Business Continuity / DR** | Pending | After T3/T4 |
 | 6 | **T6: Legacy Migration** | Pending | Final task |
 
@@ -120,7 +120,12 @@
   - *Automatic CloudFront origin-group failover on 5xx:* Would route writes to an un-restored/stale Cloud SQL database during transient errors, causing split-brain data divergence.
   - *Deploying a GCP External HTTPS Load Balancer + Cloud Armor:* Adds significant idle cost and complexity to mask `*.run.app` when CloudFront already terminates public TLS; documented as an accepted GCP exposure tradeoff in [docs/architecture.md](docs/architecture.md).
 
-*(Decisions 9–10 will be added across T4, T5, and T6.)*
+### Decision 9 (T4): Propagate API Request `trace_id` Through Queue Payloads & Add `db_query_duration_seconds`
+- **Choice:** Updated [app/main.py](app/main.py) (`create_order`) to include `trace_id` in the published queue message, updated [app/worker.py](app/worker.py) to bind `trace_id_var` from `msg.payload.get("trace_id")` and log `"order processed"`, and added `db_query_duration_seconds` Prometheus histogram in [app/metrics.py](app/metrics.py).
+- **Alternatives Rejected:**
+  - *Leaving the starter app unchanged:* The starter worker bound `trace_id_var` to the queue `msg.id` (SQS/PubSub message ID) rather than the API HTTP request `trace_id`, making it impossible to correlate a client request's `trace_id` across API and worker logs as required by T4.
+
+*(Decision 10 will be added in T5/T6.)*
 
 ---
 
@@ -261,7 +266,43 @@
   - `[PLACEHOLDER: Screenshot — Direct ALB curl returning 403 Forbidden]`
 
 ### T4: Observability & SRE (and Incident Postmortem)
-- `[PLACEHOLDER: To be populated in Task 4]`
+- **SLO Document & Error-Budget Policy:** [docs/slo.md](docs/slo.md)
+- **Capacity Statement (Stretch):** [docs/capacity.md](docs/capacity.md)
+- **On-Call Runbooks:** [docs/runbooks/README.md](docs/runbooks/README.md) ([availability](docs/runbooks/availability-burn-rate.md), [latency](docs/runbooks/latency-burn-rate.md), [endpoint-down](docs/runbooks/endpoint-down.md))
+- **Postmortem Template / Report:** [docs/postmortem-template.md](docs/postmortem-template.md)
+- **Verification Commands (standalone, run one by one):**
+  1. Run the synthetic probe against the public hostname:
+     ```bash
+     python3 .github/scripts/probe.py https://<cloudfront_domain_name>
+     ```
+  2. Trigger the scheduled synthetic probe workflow manually:
+     ```bash
+     gh workflow run synthetic-probe.yml
+     ```
+  3. Create an order with an explicit trace header to verify end-to-end `trace_id` across API and Worker logs:
+     ```bash
+     curl -i -X POST https://<cloudfront_domain_name>/orders -H "Content-Type: application/json" -H "X-Cloud-Trace-Context: trace-verify-t4-001/1;o=1" -d "{\"customer_id\":\"c-trace-t4\",\"amount_cents\":1200,\"currency\":\"USD\"}"
+     ```
+  4. Query AWS CloudWatch Logs (`nwo-<username>-dev-api` & `nwo-<username>-dev-worker`) for `trace_id`:
+     ```bash
+     aws logs filter-log-events --region us-east-1 --log-group-name nwo-<username>-dev-api --filter-pattern "{ $.trace_id = \"trace-verify-t4-001\" }"
+     ```
+     ```bash
+     aws logs filter-log-events --region us-east-1 --log-group-name nwo-<username>-dev-worker --filter-pattern "{ $.trace_id = \"trace-verify-t4-001\" }"
+     ```
+  5. Check extra `db_query_duration_seconds` Prometheus instrumentation on `/metrics`:
+     ```bash
+     curl -s https://<cloudfront_domain_name>/metrics
+     ```
+- **Verification Outputs & Screenshots:**
+  - `[PLACEHOLDER: Screenshot — AWS CloudWatch Dashboard (nwo-<username>-dev-dashboard)]`
+  - `[PLACEHOLDER: Screenshot — AWS CloudWatch Composite Burn-Rate & Cause Alarms]`
+  - `[PLACEHOLDER: Screenshot — GCP Cloud Monitoring Dashboard & SLOs (99.9% avail, 99% latency)]`
+  - `[PLACEHOLDER: Screenshot — GCP Uptime Check & Multi-Window Burn-Rate Alerts]`
+  - `[PLACEHOLDER: Screenshot — API & Worker logs sharing identical trace_id]`
+  - `[PLACEHOLDER: Screenshot — Synthetic probe output showing active cloud & visible failure test]`
+- **Live Incident Postmortem (Fill Within 60 Min of Fault Injection):**
+  - `[PLACEHOLDER: paste link or full postmortem once evaluators inject the fault]`
 
 ### T5: Business Continuity (DR, Restores, Game Day)
 - `[PLACEHOLDER: To be populated in Task 5]`
@@ -274,6 +315,6 @@
 ---
 
 ## 6. Incomplete Items / Known Limitations
-- Tasks T4, T5, T6 are pending implementation (building task by task).
+- Tasks T5 and T6 are pending implementation (building task by task).
 - `prod` environment stacks were omitted for this `dev`-only configuration.
 - `[Update before final submission with any remaining gaps or accepted constraints]`

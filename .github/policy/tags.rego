@@ -15,6 +15,15 @@ deny contains msg if {
 	msg := sprintf("AWS resource %s (%s) must carry a 'username' tag", [rc.address, rc.type])
 }
 
+is_user_label_resource(t) if {
+	t in {
+		"google_monitoring_notification_channel",
+		"google_monitoring_alert_policy",
+		"google_monitoring_custom_service",
+		"google_monitoring_uptime_check_config",
+	}
+}
+
 # Check GCP labellable resources carry the username label
 deny contains msg if {
 	rc := input.resource_changes[_]
@@ -22,12 +31,25 @@ deny contains msg if {
 	action in {"create", "update"}
 	startswith(rc.type, "google_")
 	rc.type != "google_sql_database_instance"
+	not is_user_label_resource(rc.type)
 	after := rc.change.after
 	after != null
 	"labels" in object.keys(after)
 	not after.labels.username
 	not after.terraform_labels.username
 	msg := sprintf("GCP resource %s (%s) must carry a 'username' label", [rc.address, rc.type])
+}
+
+# Check GCP monitoring resources using user_labels carry username
+deny contains msg if {
+	rc := input.resource_changes[_]
+	some action in rc.change.actions
+	action in {"create", "update"}
+	is_user_label_resource(rc.type)
+	after := rc.change.after
+	after != null
+	not after.user_labels.username
+	msg := sprintf("GCP monitoring resource %s (%s) must carry user_labels.username", [rc.address, rc.type])
 }
 
 # Check Cloud SQL user_labels carries username

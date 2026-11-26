@@ -17,7 +17,7 @@ from . import faults
 from .config import get_settings
 from .db import Order, init_db, ping_db, session_scope
 from .logging_conf import configure_logging, log, trace_id_var
-from .metrics import HTTP_LATENCY, HTTP_REQUESTS, ORDERS_CREATED, QUEUE_DEPTH
+from .metrics import DB_QUERY_LATENCY, HTTP_LATENCY, HTTP_REQUESTS, ORDERS_CREATED, QUEUE_DEPTH
 from .queueing import get_queue
 
 logger = logging.getLogger("orders-api")
@@ -131,10 +131,12 @@ def create_order(body: OrderIn, idempotency_key: str | None = Header(default=Non
     except RuntimeError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
 
+    db_start = time.perf_counter()
     with session_scope() as s:
         if idempotency_key:
             existing = s.execute(select(Order).where(Order.idempotency_key == idempotency_key)).scalar_one_or_none()
             if existing:
+                DB_QUERY_LATENCY.labels("create_order").observe(time.perf_counter() - db_start)
                 return _order_json(existing)
         order = Order(
             customer_id=body.customer_id,
@@ -148,9 +150,11 @@ def create_order(body: OrderIn, idempotency_key: str | None = Header(default=Non
         except IntegrityError:
             s.rollback()
             existing = s.execute(select(Order).where(Order.idempotency_key == idempotency_key)).scalar_one()
+            DB_QUERY_LATENCY.labels("create_order").observe(time.perf_counter() - db_start)
             return _order_json(existing)
-        payload = {"order_id": order.id}
+        payload = {"order_id": order.id, "trace_id": trace_id_var.get()}
         result = _order_json(order)
+    DB_QUERY_LATENCY.labels("create_order").observe(time.perf_counter() - db_start)
     get_queue().publish(payload)
     ORDERS_CREATED.inc()
     log(logger, logging.INFO, "order created", order_id=result["id"], amount_cents=body.amount_cents)
@@ -162,11 +166,13 @@ def create_order(body: OrderIn, idempotency_key: str | None = Header(default=Non
 def order_stats():
     """Counts per status, for the web page and for operators. Aggregates only: no customer data."""
     faults.apply_request_faults_read()
+    db_start = time.perf_counter()
     with session_scope() as s:
         rows = s.execute(select(Order.status, func.count()).group_by(Order.status)).all()
         by_status = {status: count for status, count in rows}
         oldest_new = s.execute(select(func.min(Order.created_at)).where(Order.status == "NEW")).scalar_one_or_none()
         latest = s.execute(select(func.max(Order.created_at))).scalar_one_or_none()
+    DB_QUERY_LATENCY.labels("order_stats").observe(time.perf_counter() - db_start)
     age = None
     if oldest_new is not None:
         if oldest_new.tzinfo is None:  # SQLite returns naive datetimes

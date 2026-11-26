@@ -80,6 +80,19 @@ def check_plan(plan_path: str, expected_username: str) -> list[str]:
                 ip_cfg = (settings.get("ip_configuration") or [{}])[0]
                 if ip_cfg.get("ipv4_enabled") is True:
                     errors.append(f"[SEC] {addr} Cloud SQL must not have public ipv4_enabled=true")
+            elif rtype in (
+                "google_monitoring_notification_channel",
+                "google_monitoring_alert_policy",
+                "google_monitoring_custom_service",
+                "google_monitoring_uptime_check_config",
+            ):
+                user_labels = after.get("user_labels") or {}
+                actual = user_labels.get("username")
+                if actual != expected:
+                    errors.append(
+                        f"[LABEL] {addr} ({rtype}) missing or mismatched user_labels.username="
+                        f"{expected!r} (got {actual!r})"
+                    )
             else:
                 has_labels_schema = (
                     "terraform_labels" in after
