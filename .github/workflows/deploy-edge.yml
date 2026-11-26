@@ -1,0 +1,101 @@
+name: Deploy Cross-Cloud Edge
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "terraform/modules/edge/**"
+      - "terraform/envs/edge-dev/**"
+      - ".github/workflows/deploy-edge.yml"
+  workflow_run:
+    workflows: ["Deploy AWS Platform", "Deploy GCP Platform"]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+  contents: read
+
+concurrency:
+  group: deploy-edge-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  TF_IN_AUTOMATION: "true"
+
+jobs:
+  deploy-edge:
+    name: Deploy Edge (CloudFront + KVS)
+    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    environment: dev
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.10.5"
+          terraform_wrapper: false
+
+      - name: Configure AWS Credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+      - name: Authenticate to GCP (WIF)
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
+          service_account: ${{ vars.GCP_SERVICE_ACCOUNT }}
+
+      - name: Read AWS & GCP Origin Outputs
+        id: origins
+        run: |
+          terraform -chdir=terraform/envs/aws-dev init -no-color \
+            -backend-config="bucket=${{ vars.TF_STATE_BUCKET }}" \
+            -backend-config="key=${{ vars.USERNAME }}/aws-dev/terraform.tfstate" \
+            -backend-config="region=${{ vars.AWS_REGION }}" \
+            -backend-config="use_lockfile=true" \
+            -backend-config="encrypt=true" >/dev/null
+          AWS_ALB=$(terraform -chdir=terraform/envs/aws-dev output -json 2>/dev/null | jq -r '.alb_dns_name.value // empty')
+          ORIGIN_SECRET=$(terraform -chdir=terraform/envs/aws-dev output -json 2>/dev/null | jq -r '.origin_verify_secret.value // empty')
+
+          terraform -chdir=terraform/envs/gcp-dev init -no-color \
+            -backend-config="bucket=${{ vars.GCP_TF_STATE_BUCKET }}" \
+            -backend-config="prefix=${{ vars.USERNAME }}/gcp-dev" >/dev/null
+          GCP_URL=$(terraform -chdir=terraform/envs/gcp-dev output -json 2>/dev/null | jq -r '.api_url.value // empty')
+
+          if [ -z "$AWS_ALB" ] || [ -z "$GCP_URL" ]; then
+            echo "Both aws-dev and gcp-dev must be deployed first (AWS_ALB='$AWS_ALB', GCP_URL='$GCP_URL'). Skipping edge apply for now."
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          if [ -n "$ORIGIN_SECRET" ]; then
+            echo "::add-mask::$ORIGIN_SECRET"
+          fi
+          echo "ready=true" >> "$GITHUB_OUTPUT"
+          echo "aws_alb=$AWS_ALB" >> "$GITHUB_OUTPUT"
+          echo "gcp_url=$GCP_URL" >> "$GITHUB_OUTPUT"
+          echo "origin_secret=$ORIGIN_SECRET" >> "$GITHUB_OUTPUT"
+
+      - name: Terraform Init & Apply (edge-dev)
+        if: steps.origins.outputs.ready == 'true'
+        env:
+          TF_VAR_username: ${{ vars.USERNAME }}
+          TF_VAR_name_prefix: ${{ vars.NAME_PREFIX }}
+          TF_VAR_env: dev
+          TF_VAR_aws_region: ${{ vars.AWS_REGION }}
+          TF_VAR_aws_alb_dns_name: ${{ steps.origins.outputs.aws_alb }}
+          TF_VAR_gcp_api_url: ${{ steps.origins.outputs.gcp_url }}
+          TF_VAR_origin_verify_secret: ${{ steps.origins.outputs.origin_secret }}
+        run: |
+          terraform -chdir=terraform/envs/edge-dev init -no-color \
+            -backend-config="bucket=${{ vars.TF_STATE_BUCKET }}" \
+            -backend-config="key=${{ vars.USERNAME }}/edge-dev/terraform.tfstate" \
+            -backend-config="region=${{ vars.AWS_REGION }}" \
+            -backend-config="use_lockfile=true" \
+            -backend-config="encrypt=true"
+          terraform -chdir=terraform/envs/edge-dev apply -no-color -auto-approve

@@ -5,12 +5,18 @@
 ---
 
 ## 1. Public Endpoint & Traffic Switch Summary
-- **Public Hostname:** `[PLACEHOLDER: https://dxxxxxxxxxxxx.cloudfront.net (from T3)]`
+- **Public Hostname:** `[PLACEHOLDER: https://<cloudfront_domain_name> (copy from deploy-edge output)]`
 - **`curl https://<hostname>/version` output:**
   ```json
-  [PLACEHOLDER: paste output from T3]
+  [PLACEHOLDER: paste output from curl https://<cloudfront_domain_name>/version]
   ```
-- **Traffic Switch Command / Workflow:** `[PLACEHOLDER: exact gh workflow run / CLI command from T3]`
+- **Traffic Switch Command / Workflow:**
+  ```bash
+  # Sets traffic split anywhere from 100/0 (AWS/GCP) to 0/100 in < 60s with no Terraform/redeploy:
+  gh workflow run traffic-switch.yml -f aws_percentage=0
+  # Or directly via AWS CLI + helper script:
+  ./.github/scripts/traffic_switch.sh "<kvs_arn>" 0
+  ```
 
 ---
 
@@ -60,7 +66,7 @@
 |---|---|---|---|
 | 1 | **T2: IaC & CI/CD Foundation** | Code written / `[Pending run]` | PR checks, OIDC/WIF, S3 native lock & GCS backends, `dev` deploy on merge, tag/OPA checks, drift workflow |
 | 2 | **T1: AWS Platform** | Code written / `[Pending run]` | Multi-AZ RDS PG16, ECS Fargate API & Worker in private subnets, ALB (`/readyz`), SQS+DLQ, S3 receipts, CMK KMS, least-privilege IAM |
-| 3 | **T3: GCP Platform & Edge** | Pending | After T1 |
+| 3 | **T3: GCP Platform & Edge** | Code written / `[Pending run]` | Cloud Run API & Worker (Direct VPC), Cloud SQL PG16 (private IP, PITR), Pub/Sub+DLQ, GCS, Secret Manager, CloudFront + Functions/KVS traffic switch |
 | 4 | **T4: Observability & SRE** | Pending | After T3 |
 | 5 | **T5: Business Continuity / DR** | Pending | After T3/T4 |
 | 6 | **T6: Legacy Migration** | Pending | Final task |
@@ -102,7 +108,19 @@
 - **Alternatives Rejected:**
   - *Self-signed certificate on ALB:* Untrusted by standard clients and unnecessary once CloudFront terminates public TLS.
 
-*(Decisions 7–10 will be added across T3, T4, T5, and T6.)*
+### Decision 7 (T3): AWS CloudFront + CloudFront Function + KeyValueStore for Cross-Cloud Edge & Traffic Switch
+- **Choice:** Used a single AWS CloudFront distribution (`cloudfront_default_certificate = true`) fronting both AWS ALB (`http-only` + `X-Origin-Verify` header) and GCP Cloud Run (`https-only`) with `Managed-CachingDisabled`, `Managed-AllViewerExceptHostHeader`, and a `cloudfront-js-2.0` viewer-request function reading `aws_weight` (`0..100`) from CloudFront KeyValueStore.
+- **Alternatives Rejected:**
+  - *Route 53 weighted DNS:* No domain/DNS zone is provided, DNS TTL caching violates `< 60s` deterministic switching, and ALB/Cloud Run hostnames would be exposed or require custom TLS certs.
+  - *Updating CloudFront origin weights via Terraform apply:* Slow (minutes for distribution deploy) and violates T3 requirement 5 ("without applying Terraform or redeploying, and take effect within 60 seconds"). KeyValueStore updates propagate globally in ~1–5 seconds across all HTTP methods including `POST`.
+
+### Decision 8 (T3): Deliberate Traffic Switch (No Automatic Failover) & Per-Service Cloud Run Invoker Setting
+- **Choice:** Kept cross-cloud failover deliberate (operator/workflow-triggered) to prevent stateful PostgreSQL split-brain between AWS RDS and GCP Cloud SQL, and used `invoker_iam_disabled = true` on Cloud Run API only (with Worker internal-only) to comply with GCP's `allUsers` org-policy ban.
+- **Alternatives Rejected:**
+  - *Automatic CloudFront origin-group failover on 5xx:* Would route writes to an un-restored/stale Cloud SQL database during transient errors, causing split-brain data divergence.
+  - *Deploying a GCP External HTTPS Load Balancer + Cloud Armor:* Adds significant idle cost and complexity to mask `*.run.app` when CloudFront already terminates public TLS; documented as an accepted GCP exposure tradeoff in [docs/architecture.md](docs/architecture.md).
+
+*(Decisions 9–10 will be added across T4, T5, and T6.)*
 
 ---
 
@@ -135,7 +153,24 @@
   - `[PLACEHOLDER: (Stretch) HA failover test output — forced RDS failover + task kill under load]`
 
 ### T3: GCP Platform & Cross-Cloud Traffic
-- `[PLACEHOLDER: To be populated in Task 3]`
+- **Cloud SQL Zonal/PITR, Failover Behavior, No-Bypass & Cloud Comparison:** See [docs/architecture.md](docs/architecture.md#gcp-platform--cross-cloud-edge-task-3)
+- **GCP Deploy Run URL:** `[PLACEHOLDER: link to deploy-gcp run]`
+- **Edge Deploy Run URL:** `[PLACEHOLDER: link to deploy-edge run]`
+- **Traffic Switch Test Run URL (`100/0 -> 0/100 -> 100/0`):** `[PLACEHOLDER: link to traffic-switch run]`
+- **Verification Outputs:**
+  ```bash
+  # Normal state (100% AWS):
+  [PLACEHOLDER: curl -s https://<cloudfront_domain>/version]
+  # Switched state (0/100 -> GCP within 60s) + POST /orders on GCP:
+  [PLACEHOLDER: curl -s https://<cloudfront_domain>/version && curl -s -X POST https://<cloudfront_domain>/orders ...]
+  # Direct ALB bypass check (403 Forbidden):
+  [PLACEHOLDER: curl -i http://<alb_dns_name>/version]
+  ```
+- **Screenshots:**
+  - `[PLACEHOLDER: Screenshot of Cloud Run services (API + internal Worker running as nwo-runtime)]`
+  - `[PLACEHOLDER: Screenshot of Cloud SQL pg16 (private IP only, zonal, PITR enabled)]`
+  - `[PLACEHOLDER: Screenshot of CloudFront distribution & KeyValueStore]`
+  - `[PLACEHOLDER: Screenshot of web UI (https://<cloudfront_domain>/) showing AWS badge and GCP badge after switch]`
 
 ### T4: Observability & SRE (and Incident Postmortem)
 - `[PLACEHOLDER: To be populated in Task 4]`

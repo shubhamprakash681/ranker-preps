@@ -29,3 +29,14 @@ variable "gcp_region" {
   type        = string
   default     = "us-east4"
 }
+
+variable "gcp_runtime_sa" {
+  description = "Provided shared runtime service account email."
+  type        = string
+}
+
+variable "image_ref" {
+  description = "Full Artifact Registry image reference with @sha256 digest."
+  type        = string
+  default     = ""
+}

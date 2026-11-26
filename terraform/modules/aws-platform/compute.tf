@@ -67,12 +67,43 @@ resource "aws_lb_listener" "http" {
   protocol          = "HTTP"
 
   default_action {
-    type             = "forward"
-    target_group_arn = aws_lb_target_group.api.arn
+    type             = var.enable_edge_only ? "fixed-response" : "forward"
+    target_group_arn = var.enable_edge_only ? null : aws_lb_target_group.api.arn
+
+    dynamic "fixed_response" {
+      for_each = var.enable_edge_only ? [1] : []
+      content {
+        content_type = "text/plain"
+        message_body = "Direct ALB access forbidden; use CloudFront edge"
+        status_code  = "403"
+      }
+    }
   }
 
   tags = {
     Name = "${local.prefix}-http-listener"
+  }
+}
+
+resource "aws_lb_listener_rule" "allow_cloudfront" {
+  count        = var.enable_edge_only ? 1 : 0
+  listener_arn = aws_lb_listener.http.arn
+  priority     = 10
+
+  action {
+    type             = "forward"
+    target_group_arn = aws_lb_target_group.api.arn
+  }
+
+  condition {
+    http_header {
+      http_header_name = "X-Origin-Verify"
+      values           = [random_password.origin_verify.result]
+    }
+  }
+
+  tags = {
+    Name = "${local.prefix}-cloudfront-only"
   }
 }
 

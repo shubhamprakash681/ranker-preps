@@ -32,3 +32,9 @@ output "ecs_cluster_name" {
   description = "ECS cluster name."
   value       = module.aws_platform.ecs_cluster_name
 }
+
+output "origin_verify_secret" {
+  description = "Shared secret for CloudFront X-Origin-Verify header."
+  value       = module.aws_platform.origin_verify_secret
+  sensitive   = true
+}

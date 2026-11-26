@@ -1,0 +1,59 @@
+name: Cross-Cloud Traffic Switch
+
+on:
+  workflow_dispatch:
+    inputs:
+      aws_percentage:
+        description: "Percentage of traffic routed to AWS (0..100). Remainder goes to GCP."
+        required: true
+        type: string
+        default: "100"
+
+permissions:
+  id-token: write
+  contents: read
+
+concurrency:
+  group: traffic-switch
+  cancel-in-progress: false
+
+jobs:
+  switch-traffic:
+    name: Switch Traffic (${{ inputs.aws_percentage }}% AWS)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.10.5"
+          terraform_wrapper: false
+
+      - name: Configure AWS Credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+      - name: Switch CloudFront KeyValueStore Weight (No Terraform Apply)
+        run: |
+          terraform -chdir=terraform/envs/edge-dev init -no-color \
+            -backend-config="bucket=${{ vars.TF_STATE_BUCKET }}" \
+            -backend-config="key=${{ vars.USERNAME }}/edge-dev/terraform.tfstate" \
+            -backend-config="region=${{ vars.AWS_REGION }}" \
+            -backend-config="use_lockfile=true" \
+            -backend-config="encrypt=true" >/dev/null
+          KVS_ARN=$(terraform -chdir=terraform/envs/edge-dev output -raw kvs_arn)
+          CF_DOMAIN=$(terraform -chdir=terraform/envs/edge-dev output -raw cloudfront_domain_name)
+
+          chmod +x .github/scripts/traffic_switch.sh
+          .github/scripts/traffic_switch.sh "$KVS_ARN" "${{ inputs.aws_percentage }}"
+
+          echo "Waiting 5s for edge KVS propagation..."
+          sleep 5
+          echo "Public endpoint: https://$CF_DOMAIN"
+          for i in 1 2 3 4 5; do
+            echo -n "Sample $i: "
+            curl -sS "https://$CF_DOMAIN/version"
+            echo ""
+          done

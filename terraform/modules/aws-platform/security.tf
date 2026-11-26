@@ -56,6 +56,11 @@ resource "random_password" "db" {
   override_special = "!#$%&*()-_=+[]{}<>:?"
 }
 
+resource "random_password" "origin_verify" {
+  length  = 32
+  special = false
+}
+
 resource "aws_secretsmanager_secret" "db" {
   name                    = "${local.prefix}-db-credentials"
   description             = "PostgreSQL credentials for ${local.prefix}"

@@ -97,3 +97,9 @@ output "ecs_security_group_id" {
   description = "ECS security group ID."
   value       = aws_security_group.ecs.id
 }
+
+output "origin_verify_secret" {
+  description = "Shared secret for CloudFront X-Origin-Verify header."
+  value       = random_password.origin_verify.result
+  sensitive   = true
+}

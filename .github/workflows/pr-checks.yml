@@ -253,3 +253,87 @@ jobs:
                 body,
               });
             }
+
+  plan-edge:
+    name: Plan Edge (dev)
+    needs: static-checks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.10.5"
+          terraform_wrapper: false
+
+      - name: Install Conftest
+        run: |
+          mkdir -p "${{ runner.temp }}/bin"
+          curl -fsSL -o "${{ runner.temp }}/conftest.tar.gz" "https://github.com/open-policy-agent/conftest/releases/download/v0.56.0/conftest_0.56.0_Linux_x86_64.tar.gz"
+          tar xzf "${{ runner.temp }}/conftest.tar.gz" -C "${{ runner.temp }}/bin" conftest
+          rm "${{ runner.temp }}/conftest.tar.gz"
+          echo "${{ runner.temp }}/bin" >> "$GITHUB_PATH"
+
+      - name: Configure AWS Credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+      - name: Terraform Init & Plan (edge-dev)
+        env:
+          TF_VAR_username: ${{ vars.USERNAME }}
+          TF_VAR_name_prefix: ${{ vars.NAME_PREFIX }}
+          TF_VAR_env: dev
+          TF_VAR_aws_region: ${{ vars.AWS_REGION }}
+        run: |
+          STACK_DIR="terraform/envs/edge-dev"
+          terraform -chdir="$STACK_DIR" init \
+            -backend-config="bucket=${{ vars.TF_STATE_BUCKET }}" \
+            -backend-config="key=${{ vars.USERNAME }}/edge-dev/terraform.tfstate" \
+            -backend-config="region=${{ vars.AWS_REGION }}" \
+            -backend-config="use_lockfile=true" \
+            -backend-config="encrypt=true"
+          terraform -chdir="$STACK_DIR" plan -no-color -out=tfplan.binary
+          terraform -chdir="$STACK_DIR" show -json tfplan.binary > "$STACK_DIR/tfplan.json"
+          terraform -chdir="$STACK_DIR" show -no-color tfplan.binary > "$STACK_DIR/tfplan.txt"
+
+      - name: Enforce Mandatory Username Tag & Security Policy (Python + OPA Conftest)
+        run: |
+          STACK_DIR="terraform/envs/edge-dev"
+          python3 .github/scripts/check_tags.py "$STACK_DIR/tfplan.json" "${{ vars.USERNAME }}"
+          conftest test "$STACK_DIR/tfplan.json" --policy .github/policy
+
+      - name: Post Plan on PR
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const stackDir = 'terraform/envs/edge-dev';
+            let plan = fs.readFileSync(`${stackDir}/tfplan.txt`, 'utf8');
+            if (plan.length > 60000) {
+              plan = plan.slice(0, 60000) + '\n... (truncated)';
+            }
+            const marker = '<!-- tf-plan-edge-dev -->';
+            const body = `${marker}\n### Terraform Plan: \`edge-dev\`\n\n<details><summary>Show Plan</summary>\n\n\`\`\`hcl\n${plan}\n\`\`\`\n\n</details>`;
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+            });
+            const existing = comments.find(c => c.body && c.body.includes(marker));
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: existing.id,
+                body,
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body,
+              });
+            }

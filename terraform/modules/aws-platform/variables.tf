@@ -85,3 +85,9 @@ variable "secret_recovery_window_days" {
   type        = number
   default     = 0
 }
+
+variable "enable_edge_only" {
+  description = "When true, ALB rejects direct requests without the CloudFront X-Origin-Verify header."
+  type        = bool
+  default     = false
+}

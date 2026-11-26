@@ -18,4 +18,5 @@ module "aws_platform" {
   log_retention_days          = 14
   skip_final_snapshot         = true
   secret_recovery_window_days = 0
+  enable_edge_only            = true
 }
