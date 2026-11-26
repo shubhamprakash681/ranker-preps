@@ -21,7 +21,7 @@ resource "aws_cloudwatch_log_group" "worker" {
 # ---- Application Load Balancer ----
 
 # Internet-facing ALB required by architecture; CloudFront HTTPS edge fronts this ALB in T3.
-#trivy:ignore:AVD-AWS-0052
+#trivy:ignore:AVD-AWS-0053
 resource "aws_lb" "api" {
   name                       = local.alb_name
   internal                   = false
