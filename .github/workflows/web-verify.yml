@@ -1,0 +1,216 @@
+name: Web Verification Toolbox
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "Select web verification check to run"
+        required: true
+        type: choice
+        options:
+          - t1-t3-endpoints
+          - t4-trace-and-probe
+          - t5-backup-and-restore-test
+          - t6-ecs-settlement
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  verify:
+    name: Web Verify (${{ inputs.mode }})
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.10.5"
+          terraform_wrapper: false
+
+      - name: Configure AWS Credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+      - name: Authenticate to GCP (WIF)
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
+          service_account: ${{ vars.GCP_SERVICE_ACCOUNT }}
+
+      - name: Set up gcloud
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Read Stack Outputs
+        id: outputs
+        run: |
+          terraform -chdir=terraform/envs/aws-dev init -no-color \
+            -backend-config="bucket=${{ vars.TF_STATE_BUCKET }}" \
+            -backend-config="key=${{ vars.USERNAME }}/aws-dev/terraform.tfstate" \
+            -backend-config="region=${{ vars.AWS_REGION }}" \
+            -backend-config="use_lockfile=true" \
+            -backend-config="encrypt=true" >/dev/null
+          terraform -chdir=terraform/envs/edge-dev init -no-color \
+            -backend-config="bucket=${{ vars.TF_STATE_BUCKET }}" \
+            -backend-config="key=${{ vars.USERNAME }}/edge-dev/terraform.tfstate" \
+            -backend-config="region=${{ vars.AWS_REGION }}" \
+            -backend-config="use_lockfile=true" \
+            -backend-config="encrypt=true" >/dev/null
+          terraform -chdir=terraform/envs/gcp-dev init -no-color \
+            -backend-config="bucket=${{ vars.GCP_TF_STATE_BUCKET }}" \
+            -backend-config="prefix=${{ vars.USERNAME }}/gcp-dev" >/dev/null
+
+          echo "cf_domain=$(terraform -chdir=terraform/envs/edge-dev output -json | jq -r '.cloudfront_domain_name.value // empty')" >> "$GITHUB_OUTPUT"
+          echo "alb_dns=$(terraform -chdir=terraform/envs/aws-dev output -json | jq -r '.alb_dns_name.value // empty')" >> "$GITHUB_OUTPUT"
+          echo "aws_cluster=$(terraform -chdir=terraform/envs/aws-dev output -json | jq -r '.ecs_cluster_name.value // empty')" >> "$GITHUB_OUTPUT"
+          echo "aws_receipts=$(terraform -chdir=terraform/envs/aws-dev output -json | jq -r '.receipts_bucket_name.value // empty')" >> "$GITHUB_OUTPUT"
+          echo "aws_backups=$(terraform -chdir=terraform/envs/aws-dev output -json | jq -r '.backups_bucket_name.value // empty')" >> "$GITHUB_OUTPUT"
+          echo "subnets=$(terraform -chdir=terraform/envs/aws-dev output -json | jq -c '.private_subnet_ids.value // []')" >> "$GITHUB_OUTPUT"
+          echo "ecs_sg=$(terraform -chdir=terraform/envs/aws-dev output -json | jq -r '.ecs_security_group_id.value // empty')" >> "$GITHUB_OUTPUT"
+          echo "gcp_receipts=$(terraform -chdir=terraform/envs/gcp-dev output -json | jq -r '.receipts_bucket_name.value // empty')" >> "$GITHUB_OUTPUT"
+          echo "gcp_backups=$(terraform -chdir=terraform/envs/gcp-dev output -json | jq -r '.backups_bucket_name.value // empty')" >> "$GITHUB_OUTPUT"
+          echo "restore_job=$(terraform -chdir=terraform/envs/gcp-dev output -json | jq -r '.restore_job_name.value // empty')" >> "$GITHUB_OUTPUT"
+
+      - name: Verify T1 & T3 Endpoints, End-to-End Order, Receipts & No-Bypass
+        if: inputs.mode == 't1-t3-endpoints'
+        run: |
+          CF="https://${{ steps.outputs.outputs.cf_domain }}"
+          ALB="http://${{ steps.outputs.outputs.alb_dns }}"
+          VER=$(curl -sS "$CF/version")
+          READY=$(curl -sS "$CF/readyz")
+          CLOUD=$(echo "$VER" | jq -r '.cloud')
+
+          ORDER=$(curl -sS -X POST "$CF/orders" -H "Content-Type: application/json" -d '{"customer_id":"c-web-verify","amount_cents":1999,"currency":"USD"}')
+          OID=$(echo "$ORDER" | jq -r '.id')
+          sleep 8
+          GOT=$(curl -sS "$CF/orders/$OID")
+          STATUS=$(echo "$GOT" | jq -r '.status')
+          ALB_CODE=$(curl -s -o /dev/null -w "%{http_code}" "$ALB/version" || true)
+
+          if [ "$CLOUD" = "aws" ]; then
+            RECEIPT=$(aws s3 ls "s3://${{ steps.outputs.outputs.aws_receipts }}/receipts/$OID.json" || echo "NOT_FOUND")
+          else
+            RECEIPT=$(gcloud storage ls "gs://${{ steps.outputs.outputs.gcp_receipts }}/receipts/$OID.json" || echo "NOT_FOUND")
+          fi
+
+          {
+            echo "## T1 & T3 Web Verification ($CLOUD)"
+            echo "- **Public URL:** \`$CF\`"
+            echo "- **\`GET /version\`:** \`$VER\`"
+            echo "- **\`GET /readyz\`:** \`$READY\`"
+            echo "- **Order ID:** \`$OID\` → Status: **\`$STATUS\`**"
+            echo "- **Receipt Object:** \`$RECEIPT\`"
+            echo "- **Direct ALB Bypass Check (\`$ALB/version\`):** HTTP **\`$ALB_CODE\`** (expected \`403\`)"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          echo "$GOT"
+          test "$STATUS" = "PROCESSED"
+          test "$ALB_CODE" = "403"
+
+      - name: Verify T4 Synthetic Probe, Metrics & End-to-End Trace ID
+        if: inputs.mode == 't4-trace-and-probe'
+        run: |
+          CF="https://${{ steps.outputs.outputs.cf_domain }}"
+          PROBE_OUT=$(python3 .github/scripts/probe.py "$CF")
+          TRACE_ID="trace-web-${{ github.run_id }}"
+          ORDER=$(curl -sS -X POST "$CF/orders" \
+            -H "Content-Type: application/json" \
+            -H "X-Cloud-Trace-Context: ${TRACE_ID}/1;o=1" \
+            -d '{"customer_id":"c-trace-web","amount_cents":1200,"currency":"USD"}')
+          OID=$(echo "$ORDER" | jq -r '.id')
+          METRICS=$(curl -sS "$CF/metrics" | grep "db_query_duration_seconds_bucket" | head -n 3)
+
+          echo "Waiting 15s for structured logs to flush..."
+          sleep 15
+          API_LOGS=$(aws logs filter-log-events --region "${{ vars.AWS_REGION }}" \
+            --log-group-name "${{ vars.NAME_PREFIX }}-dev-api" \
+            --filter-pattern "{ $.trace_id = \"$TRACE_ID\" }" \
+            --query 'events[].message' --output text || true)
+          WORKER_LOGS=$(aws logs filter-log-events --region "${{ vars.AWS_REGION }}" \
+            --log-group-name "${{ vars.NAME_PREFIX }}-dev-worker" \
+            --filter-pattern "{ $.trace_id = \"$TRACE_ID\" }" \
+            --query 'events[].message' --output text || true)
+
+          {
+            echo "## T4 Web Verification"
+            echo "- **Synthetic Probe:** \`$PROBE_OUT\`"
+            echo "- **Trace ID Tested:** \`$TRACE_ID\` (Order \`$OID\`)"
+            echo "### API Logs"
+            echo "\`\`\`json"
+            echo "$API_LOGS"
+            echo "\`\`\`"
+            echo "### Worker Logs"
+            echo "\`\`\`json"
+            echo "$WORKER_LOGS"
+            echo "\`\`\`"
+            echo "### Prometheus DB Latency Metric"
+            echo "\`\`\`text"
+            echo "$METRICS"
+            echo "\`\`\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Verify T5 Backup Task, Immutability & Cloud Run Standby Restore
+        if: inputs.mode == 't5-backup-and-restore-test'
+        run: |
+          SUBNET_LIST=$(echo '${{ steps.outputs.outputs.subnets }}' | jq -r 'join(",")')
+          TASK_ARN=$(aws ecs run-task --region "${{ vars.AWS_REGION }}" \
+            --cluster "${{ steps.outputs.outputs.aws_cluster }}" \
+            --launch-type FARGATE \
+            --task-definition "${{ vars.NAME_PREFIX }}-dev-backup" \
+            --network-configuration "awsvpcConfiguration={subnets=[$SUBNET_LIST],securityGroups=[${{ steps.outputs.outputs.ecs_sg }}],assignPublicIp=DISABLED}" \
+            --query 'tasks[0].taskArn' --output text)
+          echo "Started backup task: $TASK_ARN"
+          aws ecs wait tasks-stopped --region "${{ vars.AWS_REGION }}" --cluster "${{ steps.outputs.outputs.aws_cluster }}" --tasks "$TASK_ARN"
+          EXIT_CODE=$(aws ecs describe-tasks --region "${{ vars.AWS_REGION }}" --cluster "${{ steps.outputs.outputs.aws_cluster }}" --tasks "$TASK_ARN" --query 'tasks[0].containers[0].exitCode' --output text)
+          echo "Backup task exit code: $EXIT_CODE"
+          test "$EXIT_CODE" = "0"
+
+          S3_LOCK=$(aws s3api get-object-lock-configuration --bucket "${{ steps.outputs.outputs.aws_backups }}" --output json)
+          S3_FILES=$(aws s3 ls "s3://${{ steps.outputs.outputs.aws_backups }}/backups/" | tail -n 5)
+          GCS_RET=$(gcloud storage buckets describe "gs://${{ steps.outputs.outputs.gcp_backups }}" --format="yaml(retentionPolicy)")
+          GCS_FILES=$(gcloud storage ls "gs://${{ steps.outputs.outputs.gcp_backups }}/backups/" | tail -n 5)
+
+          echo "Executing standby restore test (PROMOTE_ON_RESTORE=false)..."
+          gcloud run jobs execute "${{ steps.outputs.outputs.restore_job }}" --region "${{ vars.GCP_REGION }}" --wait
+
+          {
+            echo "## T5 DR Backup & Restore Web Verification"
+            echo "- **Backup ECS Task:** \`$TASK_ARN\` (Exit code: \`$EXIT_CODE\`)"
+            echo "- **Restore Job:** \`${{ steps.outputs.outputs.restore_job }}\` completed cleanly"
+            echo "### S3 Object Lock & Backups"
+            echo "\`\`\`text"
+            echo "$S3_LOCK"
+            echo "$S3_FILES"
+            echo "\`\`\`"
+            echo "### GCS Retention Policy & Backups"
+            echo "\`\`\`text"
+            echo "$GCS_RET"
+            echo "$GCS_FILES"
+            echo "\`\`\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Run T6 Cloud Settlement Task on ECS Fargate
+        if: inputs.mode == 't6-ecs-settlement'
+        run: |
+          SUBNET_LIST=$(echo '${{ steps.outputs.outputs.subnets }}' | jq -r 'join(",")')
+          TASK_ARN=$(aws ecs run-task --region "${{ vars.AWS_REGION }}" \
+            --cluster "${{ steps.outputs.outputs.aws_cluster }}" \
+            --launch-type FARGATE \
+            --task-definition "${{ vars.NAME_PREFIX }}-dev-settlement" \
+            --network-configuration "awsvpcConfiguration={subnets=[$SUBNET_LIST],securityGroups=[${{ steps.outputs.outputs.ecs_sg }}],assignPublicIp=DISABLED}" \
+            --query 'tasks[0].taskArn' --output text)
+          aws ecs wait tasks-stopped --region "${{ vars.AWS_REGION }}" --cluster "${{ steps.outputs.outputs.aws_cluster }}" --tasks "$TASK_ARN"
+          EXIT_CODE=$(aws ecs describe-tasks --region "${{ vars.AWS_REGION }}" --cluster "${{ steps.outputs.outputs.aws_cluster }}" --tasks "$TASK_ARN" --query 'tasks[0].containers[0].exitCode' --output text)
+          S3_FILES=$(aws s3 ls "s3://${{ steps.outputs.outputs.aws_receipts }}/settlements/" || true)
+          {
+            echo "## T6 ECS Settlement Execution"
+            echo "- **Task:** \`$TASK_ARN\` (Exit code: \`$EXIT_CODE\`)"
+            echo "- **S3 Settlements:**"
+            echo "\`\`\`text"
+            echo "$S3_FILES"
+            echo "\`\`\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+          test "$EXIT_CODE" = "0"

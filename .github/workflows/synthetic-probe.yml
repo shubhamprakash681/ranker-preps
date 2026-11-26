@@ -48,7 +48,15 @@ jobs:
             exit 0
           fi
           python3 .github/scripts/probe.py "https://$CF_DOMAIN" | tee /tmp/probe.out
-          exit ${PIPESTATUS[0]}
+          EXIT=${PIPESTATUS[0]}
+          {
+            echo "## Synthetic Probe Result"
+            echo "- **Endpoint:** \`https://$CF_DOMAIN\`"
+            echo "\`\`\`text"
+            cat /tmp/probe.out
+            echo "\`\`\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+          exit "$EXIT"
 
       - name: Fail Visibly & Open Alert Issue on Outage
         if: steps.probe.outcome == 'failure'

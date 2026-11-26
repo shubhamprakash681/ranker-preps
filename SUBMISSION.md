@@ -11,12 +11,14 @@
   [PLACEHOLDER: paste output from curl https://<cloudfront_domain_name>/version]
   ```
 - **Traffic Switch Command / Workflow:**
-  ```bash
-  # Sets traffic split anywhere from 100/0 (AWS/GCP) to 0/100 in < 60s with no Terraform/redeploy:
-  gh workflow run traffic-switch.yml -f aws_percentage=0
-  # Or directly via AWS CLI + helper script:
-  ./.github/scripts/traffic_switch.sh "<kvs_arn>" 0
-  ```
+  - **Web UI (Recommended):** GitHub Repo → **Actions → Cross-Cloud Traffic Switch → Run workflow** → set `aws_percentage` (`0` to `100`, takes effect in `< 60s` with no Terraform/redeploy).
+  - **CLI equivalent:**
+    ```bash
+    gh workflow run traffic-switch.yml -f aws_percentage=0
+    ```
+    ```bash
+    ./.github/scripts/traffic_switch.sh "<kvs_arn>" 0
+    ```
 
 ---
 
@@ -134,6 +136,14 @@
 ---
 
 ## 5. Task Evidence & Screenshots
+
+> **100% Web-Based Verification (No Local AWS/GCP/GitHub CLI Required):** Every operational and verification task can be triggered directly from **GitHub → Actions → Run workflow** and inspected via the generated **Job Summary**, **Browser (`https://<cloudfront_domain_name>/`)**, **AWS Console**, and **GCP Console**:
+> - **T1 & T3 Endpoints + Receipts + 403 No-Bypass:** Actions → **Web Verification Toolbox** → `mode = t1-t3-endpoints`
+> - **T3 Traffic Switch (`100/0` ↔ `0/100`):** Actions → **Cross-Cloud Traffic Switch** → `aws_percentage = 0` (or `100`)
+> - **T4 Synthetic Probe, Trace ID & DB Metrics:** Actions → **Web Verification Toolbox** → `mode = t4-trace-and-probe` (and **Synthetic Probe** workflow)
+> - **T5 Backup Immutability & Standby Restore:** Actions → **Web Verification Toolbox** → `mode = t5-backup-and-restore-test`
+> - **T5 Full DR Failover (Data First, Then Traffic + RTO/RPO):** Actions → **DR Failover (AWS -> GCP)** → Run workflow
+> - **T6 Repeatable Load, SHA-256 Validation & Settlement:** Actions → **Task 6 Legacy Migration Rehearsal** → Run workflow (and `mode = t6-ecs-settlement` in **Web Verification Toolbox**)
 
 ### T2: Infrastructure as Code & CI/CD
 - **Pull Request Check Run URL:** `[PLACEHOLDER: https://github.com/Deloitte-DT-Training/hu-devops-26-nov-<username>/actions/runs/...]`

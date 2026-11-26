@@ -1,0 +1,86 @@
+name: Task 6 Legacy Migration Rehearsal
+
+on:
+  workflow_dispatch:
+    inputs:
+      settlement_date:
+        description: "Settlement date YYYY-MM-DD to rehearse"
+        required: false
+        type: string
+        default: "2024-06-15"
+  push:
+    branches: [main]
+    paths:
+      - "scripts/migration/**"
+      - "legacy/**"
+      - "app/settlement.py"
+      - ".github/workflows/migration-rehearsal.yml"
+
+jobs:
+  rehearse-and-validate:
+    name: Repeatable Load, SHA-256 Validation & Settlement Rehearsal
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: orders
+          POSTGRES_PASSWORD: orders
+          POSTGRES_DB: orders
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgresql://orders:orders@localhost:5432/orders
+      STORAGE_BACKEND: local
+      STORAGE_TARGET: /tmp/settlements
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install Dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run Repeatable Loader Twice (Idempotency Rehearsal)
+        id: load
+        run: |
+          echo "=== Run 1 ==="
+          python3 scripts/migration/load_legacy.py --dump legacy/legacy_dump.sql | tee /tmp/load1.txt
+          echo "=== Run 2 (repeatability check) ==="
+          python3 scripts/migration/load_legacy.py --dump legacy/legacy_dump.sql | tee /tmp/load2.txt
+
+      - name: Validate Source vs Target (Row Counts & SHA-256 Checksums)
+        run: |
+          python3 scripts/migration/validate_legacy.py --dump legacy/legacy_dump.sql | tee /tmp/validate.txt
+
+      - name: Run Migrated Settlement Job (Rehearsal)
+        run: |
+          DAY="${{ inputs.settlement_date || '2024-06-15' }}"
+          python -m app.settlement "$DAY" | tee /tmp/settlement.txt
+          head -n 10 "/tmp/settlements/settlement_${DAY//-/}.csv" | tee /tmp/csv_sample.txt
+
+      - name: Write Rehearsal Summary
+        run: |
+          {
+            echo "## Task 6 Migration Rehearsal & Validation Summary"
+            echo "### Repeatable Load Output"
+            echo "\`\`\`text"
+            cat /tmp/load2.txt
+            echo "\`\`\`"
+            echo "### Validation Output (Row Counts & SHA-256 Checksums)"
+            echo "\`\`\`text"
+            cat /tmp/validate.txt
+            echo "\`\`\`"
+            echo "### Cloud-Native Settlement CSV Sample"
+            echo "\`\`\`csv"
+            cat /tmp/csv_sample.txt
+            echo "\`\`\`"
+          } >> "$GITHUB_STEP_SUMMARY"

@@ -52,8 +52,16 @@ jobs:
           echo "Waiting 5s for edge KVS propagation..."
           sleep 5
           echo "Public endpoint: https://$CF_DOMAIN"
+          SAMPLES=""
           for i in 1 2 3 4 5; do
-            echo -n "Sample $i: "
-            curl -sS "https://$CF_DOMAIN/version"
-            echo ""
+            RESP=$(curl -sS "https://$CF_DOMAIN/version")
+            echo "Sample $i: $RESP"
+            SAMPLES="${SAMPLES}\nSample $i: $RESP"
           done
+          {
+            echo "## Cross-Cloud Traffic Switch (${{ inputs.aws_percentage }}% AWS)"
+            echo "- **Public Endpoint:** \`https://$CF_DOMAIN\`"
+            echo "\`\`\`json"
+            echo -e "$SAMPLES"
+            echo "\`\`\`"
+          } >> "$GITHUB_STEP_SUMMARY"
