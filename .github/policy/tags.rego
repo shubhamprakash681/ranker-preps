@@ -73,13 +73,21 @@ deny contains msg if {
 	msg := sprintf("GCP IAM binding %s must never grant allUsers", [rc.address])
 }
 
-# Forbid unencrypted S3 buckets without KMS/AES256 or public access block disabled
+all_s3_blocks_enabled(after) if {
+	after.block_public_acls == true
+	after.block_public_policy == true
+	after.ignore_public_acls == true
+	after.restrict_public_buckets == true
+}
+
+# Forbid S3 public access blocks with any flag disabled
 deny contains msg if {
 	rc := input.resource_changes[_]
 	some action in rc.change.actions
 	action in {"create", "update"}
 	rc.type == "aws_s3_bucket_public_access_block"
 	after := rc.change.after
-	not (after.block_public_acls == true and after.block_public_policy == true and after.ignore_public_acls == true and after.restrict_public_buckets == true)
+	after != null
+	not all_s3_blocks_enabled(after)
 	msg := sprintf("S3 public access block %s must enable all four block flags", [rc.address])
 }
