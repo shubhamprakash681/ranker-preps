@@ -32,3 +32,13 @@ output "cloud_sql_private_ip" {
   description = "Cloud SQL private IP."
   value       = module.gcp_platform.cloud_sql_private_ip
 }
+
+output "backups_bucket_name" {
+  description = "Immutable GCS backups bucket name."
+  value       = module.gcp_platform.backups_bucket_name
+}
+
+output "restore_job_name" {
+  description = "Cloud Run restore job name."
+  value       = module.gcp_platform.restore_job_name
+}

@@ -151,6 +151,9 @@ jobs:
           TF_VAR_gcp_project_id: ${{ vars.GCP_PROJECT_ID }}
           TF_VAR_gcp_region: ${{ vars.GCP_REGION }}
           TF_VAR_gcp_runtime_sa: ${{ vars.GCP_RUNTIME_SERVICE_ACCOUNT }}
+          TF_VAR_gcp_restore_sa: ${{ vars.GCP_RESTORE_SERVICE_ACCOUNT }}
+          TF_VAR_gcp_scheduler_sa: ${{ vars.GCP_SCHEDULER_SERVICE_ACCOUNT }}
+          TF_VAR_gcp_backup_writer_sa: ${{ vars.GCP_BACKUP_WRITER_SERVICE_ACCOUNT }}
           TF_VAR_image_ref: ${{ steps.push.outputs.image_ref }}
           TF_VAR_repo_url: ${{ github.server_url }}/${{ github.repository }}
         run: |

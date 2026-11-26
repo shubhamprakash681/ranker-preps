@@ -97,3 +97,23 @@ variable "repo_url" {
   type        = string
   default     = "https://github.com/Deloitte-DT-Training"
 }
+
+variable "aws_backup_task_role_arn" {
+  description = "Provided shared IAM role ARN for the scheduled backup ECS task."
+  type        = string
+}
+
+variable "gcp_aws_wif_provider" {
+  description = "Provided pre-built GCP Workload Identity provider path for AWS-to-GCP backup federation."
+  type        = string
+}
+
+variable "gcp_backup_writer_sa" {
+  description = "Provided shared GCP backup writer service account email."
+  type        = string
+}
+
+variable "gcp_project_id" {
+  description = "Shared GCP project ID used to compute the target GCS backup bucket name."
+  type        = string
+}

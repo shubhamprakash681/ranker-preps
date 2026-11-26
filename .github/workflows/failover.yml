@@ -1,0 +1,132 @@
+name: DR Failover (AWS -> GCP)
+
+on:
+  workflow_dispatch:
+    inputs:
+      force_stale:
+        description: "Allow failover even if newest backup is older than 15 minutes (900s)"
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  id-token: write
+  contents: read
+
+concurrency:
+  group: dr-failover
+  cancel-in-progress: false
+
+jobs:
+  failover:
+    name: Failover to GCP (Data First, Then Traffic)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.10.5"
+          terraform_wrapper: false
+
+      - name: Authenticate to GCP (WIF)
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
+          service_account: ${{ vars.GCP_SERVICE_ACCOUNT }}
+
+      - name: Set up gcloud
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Configure AWS Credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+      - name: Step 1 — Measure RPO & Restore Newest Immutable Backup into Cloud SQL
+        id: data
+        run: |
+          START_EPOCH=$(date +%s)
+          echo "start_epoch=$START_EPOCH" >> "$GITHUB_OUTPUT"
+
+          BACKUP_BUCKET="${{ vars.NAME_PREFIX }}-dev-backups-${{ vars.GCP_PROJECT_ID }}"
+          RESTORE_JOB="${{ vars.NAME_PREFIX }}-dev-restore"
+
+          LATEST_URI=$(gcloud storage ls "gs://${BACKUP_BUCKET}/backups/orders-*.json.gz" | sort | tail -n 1)
+          if [ -z "$LATEST_URI" ]; then
+            echo "ERROR: No backup found in gs://${BACKUP_BUCKET}/backups/!" >&2
+            exit 1
+          fi
+
+          FILENAME=$(basename "$LATEST_URI")
+          TS_RAW="${FILENAME#orders-}"
+          TS_RAW="${TS_RAW%.json.gz}"
+          TS_ISO="${TS_RAW:0:4}-${TS_RAW:4:2}-${TS_RAW:6:2}T${TS_RAW:9:2}:${TS_RAW:11:2}:${TS_RAW:13:2}Z"
+          BACKUP_EPOCH=$(date -u -d "$TS_ISO" +%s)
+          RPO_SECONDS=$((START_EPOCH - BACKUP_EPOCH))
+
+          echo "Newest backup: $LATEST_URI ($TS_ISO)"
+          echo "Measured RPO: ${RPO_SECONDS}s (Target: <= 900s / 15m)"
+
+          if [ "$RPO_SECONDS" -gt 900 ] && [ "${{ inputs.force_stale }}" != "true" ]; then
+            echo "ERROR: Stale standby guard triggered (RPO ${RPO_SECONDS}s > 900s). Re-run with force_stale=true to override." >&2
+            exit 1
+          fi
+
+          echo "latest_backup=$LATEST_URI" >> "$GITHUB_OUTPUT"
+          echo "backup_ts=$TS_ISO" >> "$GITHUB_OUTPUT"
+          echo "rpo_seconds=$RPO_SECONDS" >> "$GITHUB_OUTPUT"
+
+          echo "Executing Cloud Run restore job $RESTORE_JOB (PROMOTE_ON_RESTORE=true)..."
+          gcloud run jobs execute "$RESTORE_JOB" \
+            --region "${{ vars.GCP_REGION }}" \
+            --wait \
+            --update-env-vars="PROMOTE_ON_RESTORE=true"
+
+      - name: Step 2 — Shift 100% Edge Traffic to GCP & Print Measured RTO / RPO
+        run: |
+          terraform -chdir=terraform/envs/edge-dev init -no-color \
+            -backend-config="bucket=${{ vars.TF_STATE_BUCKET }}" \
+            -backend-config="key=${{ vars.USERNAME }}/edge-dev/terraform.tfstate" \
+            -backend-config="region=${{ vars.AWS_REGION }}" \
+            -backend-config="use_lockfile=true" \
+            -backend-config="encrypt=true" >/dev/null
+          KVS_ARN=$(terraform -chdir=terraform/envs/edge-dev output -raw kvs_arn)
+          CF_DOMAIN=$(terraform -chdir=terraform/envs/edge-dev output -raw cloudfront_domain_name)
+
+          chmod +x .github/scripts/traffic_switch.sh
+          .github/scripts/traffic_switch.sh "$KVS_ARN" 0
+
+          echo "Waiting for CloudFront to serve GCP..."
+          for i in $(seq 1 12); do
+            VER=$(curl -sS "https://$CF_DOMAIN/version" || true)
+            READY=$(curl -sS "https://$CF_DOMAIN/readyz" || true)
+            echo "Attempt $i: /version=$VER /readyz=$READY"
+            if echo "$VER" | grep -q '"cloud":"gcp"' && echo "$READY" | grep -q '"status":"ready"'; then
+              break
+            fi
+            sleep 5
+          done
+
+          END_EPOCH=$(date +%s)
+          START_EPOCH="${{ steps.data.outputs.start_epoch }}"
+          RTO_SECONDS=$((END_EPOCH - START_EPOCH))
+          RPO_SECONDS="${{ steps.data.outputs.rpo_seconds }}"
+
+          echo "========================================="
+          echo "DR FAILOVER COMPLETE"
+          echo "Newest Backup : ${{ steps.data.outputs.latest_backup }} (${{ steps.data.outputs.backup_ts }})"
+          echo "Measured RPO  : ${RPO_SECONDS}s (Target <= 900s / 15m)"
+          echo "Measured RTO  : ${RTO_SECONDS}s (Target <= 1800s / 30m)"
+          echo "Public URL    : https://$CF_DOMAIN"
+          echo "========================================="
+
+          {
+            echo "## DR Failover Summary (AWS -> GCP)"
+            echo "- **Public URL:** \`https://$CF_DOMAIN\`"
+            echo "- **Restored Backup:** \`${{ steps.data.outputs.latest_backup }}\` (\`${{ steps.data.outputs.backup_ts }}\`)"
+            echo "- **Measured RPO:** **${RPO_SECONDS}s** (target ≤ 900s / 15m)"
+            echo "- **Measured RTO:** **${RTO_SECONDS}s** (target ≤ 1800s / 30m)"
+            echo "- **Live Check:** \`$(curl -sS "https://$CF_DOMAIN/version")\`"
+          } >> "$GITHUB_STEP_SUMMARY"

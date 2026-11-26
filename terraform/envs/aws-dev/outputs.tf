@@ -38,3 +38,23 @@ output "origin_verify_secret" {
   value       = module.aws_platform.origin_verify_secret
   sensitive   = true
 }
+
+output "backups_bucket_name" {
+  description = "Immutable S3 backups bucket name."
+  value       = module.aws_platform.backups_bucket_name
+}
+
+output "backup_task_definition_arn" {
+  description = "Backup ECS task definition ARN."
+  value       = module.aws_platform.backup_task_definition_arn
+}
+
+output "private_subnet_ids" {
+  description = "Shared private subnet IDs."
+  value       = module.aws_platform.private_subnet_ids
+}
+
+output "ecs_security_group_id" {
+  description = "ECS security group ID."
+  value       = module.aws_platform.ecs_security_group_id
+}

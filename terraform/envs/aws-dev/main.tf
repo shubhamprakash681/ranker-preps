@@ -20,4 +20,8 @@ module "aws_platform" {
   secret_recovery_window_days = 0
   enable_edge_only            = true
   repo_url                    = var.repo_url
+  aws_backup_task_role_arn    = var.aws_backup_task_role_arn
+  gcp_aws_wif_provider        = var.gcp_aws_wif_provider
+  gcp_backup_writer_sa        = var.gcp_backup_writer_sa
+  gcp_project_id              = var.gcp_project_id
 }

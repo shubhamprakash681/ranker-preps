@@ -103,3 +103,18 @@ output "origin_verify_secret" {
   value       = random_password.origin_verify.result
   sensitive   = true
 }
+
+output "backups_bucket_name" {
+  description = "Immutable S3 backups bucket name."
+  value       = aws_s3_bucket.backups.id
+}
+
+output "backup_task_definition_arn" {
+  description = "Backup ECS task definition ARN."
+  value       = aws_ecs_task_definition.backup.arn
+}
+
+output "backup_log_group_name" {
+  description = "CloudWatch log group for backup task."
+  value       = aws_cloudwatch_log_group.backup.name
+}

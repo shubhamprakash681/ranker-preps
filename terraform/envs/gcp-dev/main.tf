@@ -15,4 +15,7 @@ module "gcp_platform" {
   worker_min_instances = 1
   worker_max_instances = 2
   repo_url             = var.repo_url
+  gcp_restore_sa       = var.gcp_restore_sa
+  gcp_scheduler_sa     = var.gcp_scheduler_sa
+  gcp_backup_writer_sa = var.gcp_backup_writer_sa
 }

@@ -46,3 +46,18 @@ variable "repo_url" {
   type        = string
   default     = "https://github.com/Deloitte-DT-Training"
 }
+
+variable "gcp_restore_sa" {
+  description = "Provided shared restore service account email."
+  type        = string
+}
+
+variable "gcp_scheduler_sa" {
+  description = "Provided shared Cloud Scheduler service account email."
+  type        = string
+}
+
+variable "gcp_backup_writer_sa" {
+  description = "Provided shared backup writer service account email."
+  type        = string
+}

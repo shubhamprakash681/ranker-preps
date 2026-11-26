@@ -68,7 +68,7 @@
 | 2 | **T1: AWS Platform** | Deployed & verified | Multi-AZ RDS PG16, ECS Fargate API & Worker in private subnets, ALB (`/readyz`), SQS+DLQ, S3 receipts, CMK KMS, least-privilege IAM |
 | 3 | **T3: GCP Platform & Edge** | Code written / `[Pending verify]` | Cloud Run API & Worker (Direct VPC), Cloud SQL PG16 (private IP, PITR), Pub/Sub+DLQ, GCS, Secret Manager, CloudFront + Functions/KVS traffic switch |
 | 4 | **T4: Observability & SRE** | Code written / `[Pending incident]` | SLOs & error-budget policy, CloudWatch & Cloud Monitoring dashboards + multi-window burn-rate & cause alerts, API→Worker `trace_id`, `db_query_duration_seconds`, synthetic probe, runbooks |
-| 5 | **T5: Business Continuity / DR** | Pending | After T3/T4 |
+| 5 | **T5: Business Continuity / DR** | Code written / `[Pending game day]` | 10-min immutable S3 Object Lock + GCS retention backups via `nwo-aws` WIF, Cloud Run restore job + Scheduler (`dr_state` promotion guard), automated `failover.yml` printing RPO/RTO |
 | 6 | **T6: Legacy Migration** | Pending | Final task |
 
 ---
@@ -125,7 +125,11 @@
 - **Alternatives Rejected:**
   - *Leaving the starter app unchanged:* The starter worker bound `trace_id_var` to the queue `msg.id` (SQS/PubSub message ID) rather than the API HTTP request `trace_id`, making it impossible to correlate a client request's `trace_id` across API and worker logs as required by T4.
 
-*(Decision 10 will be added in T5/T6.)*
+### Decision 10 (T5): Keyless WIF Cross-Cloud Immutable Backups & Promotion-Guarded Restore
+- **Choice:** Scheduled an ECS Fargate backup task every 10 minutes (`rate(10 minutes)`) running as `AWS_BACKUP_TASK_ROLE_ARN` (`nwo-backup-task`), writing timestamped gzipped snapshots to an S3 Object Lock (`GOVERNANCE`, 7d) bucket and federating via `nwo-aws` WIF (`external_account` using Fargate STS creds) to a GCS bucket with a 7-day retention policy; paired with a Cloud Run restore job (`app.dr_restore`) that checks/sets `dr_state.promoted = 'true'` to block scheduled overwrites after failover.
+- **Alternatives Rejected:**
+  - *Cross-cloud PostgreSQL streaming replication over public internet or VPN:* Requires long-lived network/tunnel changes prohibited in the shared VPC and exceeds shared budget guardrails.
+  - *Installing `pg_dump` in the app image:* Expands OS CVE scan surface (`debian` packages) and risks version mismatch; pure-Python `psycopg` logical snapshots + `init_db()` work uniformly in the single existing image and allow application-level `dr_state` promotion protection.
 
 ---
 
@@ -321,9 +325,56 @@
   - `[PLACEHOLDER: paste link or full postmortem once evaluators inject the fault]`
 
 ### T5: Business Continuity (DR, Restores, Game Day)
-- `[PLACEHOLDER: To be populated in Task 5]`
-- **Game-Day Measured RPO:** `[PLACEHOLDER]`
-- **Game-Day Measured RTO:** `[PLACEHOLDER]`
+- **DR Runbook, Standby Safety, Failback & Cost Analysis:** [docs/runbooks/dr-failover.md](docs/runbooks/dr-failover.md)
+- **Game-Day Report Template:** [docs/game-day-report-template.md](docs/game-day-report-template.md)
+- **Failover Workflow Run URL:** `[PLACEHOLDER: link to failover.yml run]`
+- **Game-Day Measured RPO:** `[PLACEHOLDER: e.g. 240s (Target <= 900s / 15m)]`
+- **Game-Day Measured RTO:** `[PLACEHOLDER: e.g. 75s (Target <= 1800s / 30m)]`
+- **Verification Commands (standalone, run one by one):**
+  1. Confirm immutable backups exist in S3 (`Object Lock`) and GCS (`retentionPolicy`):
+     ```bash
+     aws s3 ls s3://nwo-<username>-dev-backups-<account_id>/backups/
+     ```
+     ```bash
+     aws s3api get-object-lock-configuration --bucket nwo-<username>-dev-backups-<account_id>
+     ```
+     ```bash
+     gcloud storage ls gs://nwo-<username>-dev-backups-<gcp_project_id>/backups/
+     ```
+     ```bash
+     gcloud storage buckets describe gs://nwo-<username>-dev-backups-<gcp_project_id> --format="yaml(retentionPolicy)"
+     ```
+  2. Manually trigger a backup task immediately on ECS (optional, otherwise runs every 10 min):
+     ```bash
+     aws ecs run-task --region us-east-1 --cluster nwo-<username>-dev-cluster --launch-type FARGATE --task-definition nwo-<username>-dev-backup --network-configuration "awsvpcConfiguration={subnets=[<private_subnet_1>,<private_subnet_2>],securityGroups=[<ecs_sg_id>],assignPublicIp=DISABLED}"
+     ```
+  3. Prove restorability (run Cloud Run restore job into Cloud SQL):
+     ```bash
+     gcloud run jobs execute nwo-<username>-dev-restore --region us-east4 --wait
+     ```
+  4. Run automated DR failover (data first, then traffic, prints measured RTO & RPO):
+     ```bash
+     gh workflow run failover.yml
+     ```
+  5. Verify post-failover GCP serving & end-to-end order processing:
+     ```bash
+     curl -s https://<cloudfront_domain_name>/version
+     ```
+     ```bash
+     curl -s -X POST https://<cloudfront_domain_name>/orders -H "Content-Type: application/json" -d "{\"customer_id\":\"c-dr-verify\",\"amount_cents\":3300,\"currency\":\"USD\"}"
+     ```
+     ```bash
+     curl -s https://<cloudfront_domain_name>/orders/<order_id>
+     ```
+- **Restore Evidence & Game-Day Output:**
+  ```text
+  [PLACEHOLDER: paste restore job logs, failover.yml RTO/RPO summary, and post-failover order output]
+  ```
+- **Screenshots:**
+  - `[PLACEHOLDER: Screenshot — S3 backups bucket with Object Lock + GCS backups bucket with retention policy]`
+  - `[PLACEHOLDER: Screenshot — Cloud Run restore job execution log showing orders restored into Cloud SQL]`
+  - `[PLACEHOLDER: Screenshot — failover.yml run summary printing Measured RPO & RTO]`
+  - `[PLACEHOLDER: Screenshot — Post-failover order PROCESSED on GCP]`
 
 ### T6: Legacy Migration
 - `[PLACEHOLDER: To be populated in Task 6]`
@@ -331,6 +382,6 @@
 ---
 
 ## 6. Incomplete Items / Known Limitations
-- Tasks T5 and T6 are pending implementation (building task by task).
+- Task T6 is pending implementation (building task by task).
 - `prod` environment stacks were omitted for this `dev`-only configuration.
 - `[Update before final submission with any remaining gaps or accepted constraints]`
